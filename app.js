@@ -41,7 +41,6 @@ var S = {
   farm: 'قرضة',
   located: false,
   photo: null,
-  photoName: '',
   db: { harvests: [], sales: [], expenses: [], payments: [], users: [] }
 };
 
@@ -643,7 +642,7 @@ function viewSale() {
   var customers = uniq(D().Sa.map(function (s) { return s.customer; }).filter(Boolean));
   return '<section class="flow-page">' + head('تسجيل بيع', 'سجّل بيع الحراج النقدي أو الآجل') +
   '<div class="flow-grid"><div class="form-card">' +
-    '<label>المزرعة<select id="sFarm" data-act="sFarm">' + FARM_NAMES.map(function (f) {
+    '<label>المزرعة<select id="sFarm">' + FARM_NAMES.map(function (f) {
       return '<option' + (S.farm === f ? ' selected' : '') + '>' + esc(f) + '</option>';
     }).join('') + '</select></label>' +
     '<div class="stock-line"><span>المخزون المتاح</span><b>' + num(st) + ' سلة</b></div>' +
