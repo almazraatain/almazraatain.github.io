@@ -7,6 +7,9 @@ var API_DEFAULT = 'https://script.google.com/macros/s/AKfycbz2Lhur_UImYicb6r64R4
 var API = localStorage.getItem('mzr_api') || API_DEFAULT;
 var KEY = 'mzr-key-2026-almazraatain';
 
+/* الرابط جاهز فقط إذا كان رابط Apps Script صحيح الشكل */
+function apiReady() { return /^https:\/\/script\.google\.com\/.+\/exec$/.test(API); }
+
 var FARMS = {
   'قرضة': { code: 'QAR', lat: 18.307193, lng: 42.429743 },
   'رظف':  { code: 'RAD', lat: 18.249335, lng: 42.496246 }
@@ -371,7 +374,7 @@ function mobileBar() {
 
 /* ── تسجيل الدخول ── */
 function viewAuth() {
-  if (API === API_DEFAULT) {
+  if (!apiReady()) {
     return '<main dir="rtl" class="login-page"><form class="login-card" id="apiForm">' +
       '<span class="login-logo">ف</span><h1>ربط النظام</h1>' +
       '<p>ألصق رابط الخادم (Apps Script) لمرة واحدة على هذا الجهاز</p>' +
@@ -1170,7 +1173,7 @@ function refresh() {
 }
 
 function boot() {
-  if (API === API_DEFAULT) { S.user = null; render(); return; }
+  if (!apiReady()) { S.user = null; render(); return; }
   if (S.token) {
     refresh().then(function () { S.view = 'home'; render(); })
       .catch(function () { S.token = ''; localStorage.removeItem('mzr_token'); boot(); });
