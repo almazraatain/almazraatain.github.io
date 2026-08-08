@@ -8,7 +8,10 @@ var API = localStorage.getItem('mzr_api') || API_DEFAULT;
 var KEY = 'mzr-key-2026-almazraatain';
 
 /* الرابط جاهز فقط إذا كان رابط Apps Script صحيح الشكل */
-function apiReady() { return /^https:\/\/script\.google\.com\/.+\/exec$/.test(API); }
+function apiReady() {
+  return /^https:\/\/script\.google\.com\/.+\/exec$/.test(API) ||
+         /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(API);
+}
 
 var FARMS = {
   'قرضة': { code: 'QAR', lat: 18.307193, lng: 42.429743 },
@@ -32,6 +35,11 @@ var ERR = {
   NOT_ADMIN: 'هذه الصلاحية للمدير فقط', NOT_FOUND: 'السجل غير موجود',
   DUP_PHONE: 'رقم الجوال مسجّل مسبقًا', SELF_LOCK: 'لا يمكنك تعطيل حسابك',
   STOCK_LOCK: 'لا يمكن إلغاء هذه الجولة لأن سلالها مباعة', NO_IMG: 'تعذر جلب الصورة',
+  NO_AI_KEY: 'لم يُضبط مفتاح الذكاء الاصطناعي في إعدادات الخادم',
+  NO_AI_MODEL: 'تعذر العثور على نموذج متاح لمفتاحك',
+  AI_QUOTA: 'تجاوزت الحصة المجانية اليومية، حاول غدًا',
+  AI_FAIL: 'تعذر تحليل الصورة',
+  AI_PARSE: 'رد الذكاء الاصطناعي غير مفهوم',
   ERR: 'حدث خطأ في الخادم'
 };
 
@@ -45,6 +53,7 @@ var S = {
   farm: 'قرضة',
   located: false,
   photo: null,
+  queue: [], syncing: false, online: navigator.onLine,
   db: { harvests: [], sales: [], expenses: [], payments: [], users: [] }
 };
 
@@ -115,6 +124,12 @@ function phoneNorm(raw) {
 }
 
 /* ═══════════ الاتصال بالخادم ═══════════ */
+function netErr() {
+  var e = new Error('لا يوجد اتصال بالإنترنت');
+  e.offline = true;
+  return e;
+}
+
 function call(action, extra) {
   var body = { k: KEY, a: action, t: S.token };
   for (var p in extra) body[p] = extra[p];
@@ -129,7 +144,121 @@ function call(action, extra) {
       throw new Error(ERR[d.error] || d.error);
     }
     return d;
-  }, function () { throw new Error('تعذر الاتصال بالخادم، تحقق من الإنترنت'); });
+  }, function () { throw netErr(); });
+}
+
+/* ═══════════ التخزين المحلي (IndexedDB) ═══════════ */
+var DB = null;
+function idb() {
+  if (DB) return Promise.resolve(DB);
+  return new Promise(function (res, rej) {
+    var rq = indexedDB.open('mzr', 1);
+    rq.onupgradeneeded = function () {
+      var d = rq.result;
+      if (!d.objectStoreNames.contains('queue')) d.createObjectStore('queue', { keyPath: 'id' });
+      if (!d.objectStoreNames.contains('cache')) d.createObjectStore('cache', { keyPath: 'key' });
+    };
+    rq.onsuccess = function () { DB = rq.result; res(DB); };
+    rq.onerror = function () { rej(rq.error); };
+  });
+}
+function idbDo(store, mode, fn) {
+  return idb().then(function (d) {
+    return new Promise(function (res, rej) {
+      var tx = d.transaction(store, mode), rq = fn(tx.objectStore(store));
+      tx.oncomplete = function () { res(rq && rq.result); };
+      tx.onerror = function () { rej(tx.error); };
+    });
+  }).catch(function () { return null; });
+}
+function idbPut(store, obj) { return idbDo(store, 'readwrite', function (s) { return s.put(obj); }); }
+function idbDel(store, id) { return idbDo(store, 'readwrite', function (s) { return s.delete(id); }); }
+function idbAll(store) { return idbDo(store, 'readonly', function (s) { return s.getAll(); }).then(function (r) { return r || []; }); }
+
+/* ═══════════ طابور العمليات غير المرسلة ═══════════ */
+function opId() { return 'q' + Date.now() + Math.random().toString(36).slice(2, 7); }
+
+function queueOp(t2, rec, img) {
+  var item = { id: opId(), t2: t2, rec: rec, img: img || '', at: new Date().toISOString(), status: 'pending', error: '' };
+  return idbPut('queue', item).then(function () {
+    S.queue.push(item);
+    return { queued: true, id: item.id };
+  });
+}
+
+/* يرسل العملية فورًا، وإن تعذّر الاتصال يحفظها للرفع لاحقًا */
+function submitOp(t2, rec, img) {
+  if (!navigator.onLine) return queueOp(t2, rec, img);
+  return call('add', { t2: t2, rec: rec, img: img }).catch(function (e) {
+    if (e.offline) return queueOp(t2, rec, img);
+    throw e;
+  });
+}
+
+function loadQueue() {
+  return idbAll('queue').then(function (q) {
+    S.queue = q.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
+    return S.queue;
+  });
+}
+
+function pendingCount() {
+  return S.queue.filter(function (q) { return q.status === 'pending'; }).length;
+}
+function failedCount() {
+  return S.queue.filter(function (q) { return q.status === 'failed'; }).length;
+}
+
+/* يرفع الطابور بالترتيب — يتوقف فور انقطاع الشبكة */
+function syncQueue(loud) {
+  if (S.syncing || !navigator.onLine || !S.token) return Promise.resolve(0);
+  var items = S.queue.filter(function (q) { return q.status === 'pending'; });
+  if (!items.length) return Promise.resolve(0);
+  S.syncing = true;
+  if (loud) toast('جارٍ رفع ' + num(items.length) + ' عملية محفوظة…');
+
+  var done = 0;
+  function step(i) {
+    if (i >= items.length) return Promise.resolve();
+    var it = items[i];
+    return call('add', { t2: it.t2, rec: it.rec, img: it.img })
+      .then(function () {
+        done++;
+        S.queue = S.queue.filter(function (q) { return q.id !== it.id; });
+        return idbDel('queue', it.id).then(function () { return step(i + 1); });
+      })
+      .catch(function (e) {
+        if (e.offline) return;
+        it.status = 'failed'; it.error = e.message;
+        return idbPut('queue', it).then(function () { return step(i + 1); });
+      });
+  }
+
+  return step(0).then(function () {
+    S.syncing = false;
+    if (done) {
+      return refresh().then(function () {
+        render();
+        toast('تم رفع ' + num(done) + ' عملية', 'good');
+        return done;
+      }).catch(function () { render(); return done; });
+    }
+    if (failedCount()) render();
+    return done;
+  }).catch(function () { S.syncing = false; return 0; });
+}
+
+function retryFailed() {
+  S.queue.forEach(function (q) {
+    if (q.status === 'failed') { q.status = 'pending'; q.error = ''; idbPut('queue', q); }
+  });
+  render();
+  return syncQueue(true);
+}
+
+function dropQueued(id) {
+  S.queue = S.queue.filter(function (q) { return q.id !== id; });
+  return idbDel('queue', id).then(function () { render(); });
 }
 
 /* ═══════════ ضغط الصور ═══════════ */
@@ -234,6 +363,215 @@ function openCamera(title) {
   }
 }
 
+/* ═══════════ الذكاء الاصطناعي ═══════════ */
+function aiCall(mode, img) {
+  if (!navigator.onLine) return Promise.reject(new Error('التحليل يحتاج اتصالًا بالإنترنت'));
+  return call('ai', { mode: mode, img: img }).then(function (r) { return r.data || {}; });
+}
+
+/* قراءة الفاتورة وتعبئة الحقول */
+function readInvoice(btn) {
+  if (!S.photo) return toast('صوّر الفاتورة أولًا', 'bad');
+  if (S.aiBusy) return;
+  S.aiBusy = true;
+  var old = btn.textContent;
+  btn.disabled = true; btn.textContent = 'جارٍ قراءة الفاتورة…';
+  aiCall('invoice', S.photo).then(function (d) {
+    S.aiBusy = false; btn.disabled = false; btn.textContent = old;
+    var got = [];
+    if (d.amount > 0) { document.getElementById('eAmt').value = d.amount; got.push('المبلغ'); }
+    if (d.category && CATEGORIES.indexOf(d.category) >= 0) {
+      document.getElementById('eCat').value = d.category; got.push('التصنيف');
+    }
+    var notes = document.getElementById('eNotes');
+    var extra = [];
+    if (d.supplier) extra.push('المورّد: ' + d.supplier);
+    if (d.date) extra.push('تاريخ الفاتورة: ' + d.date);
+    if (extra.length && notes && !notes.value.trim()) { notes.value = extra.join(' · '); got.push('الملاحظات'); }
+
+    var conf = Math.round((Number(d.confidence) || 0) * 100);
+    var box = document.getElementById('aiHint');
+    if (box) {
+      box.className = 'ai-hint ' + (conf >= 70 ? 'ok' : 'warn');
+      box.innerHTML = got.length
+        ? '<b>تمت قراءة: ' + esc(got.join('، ')) + '</b><small>دقة التعرّف ' + num(conf) + '٪ — راجع الأرقام قبل الحفظ</small>'
+        : '<b>تعذّرت قراءة بيانات واضحة</b><small>أدخل البيانات يدويًا</small>';
+    }
+    if (!got.length) toast('لم أتمكن من قراءة الفاتورة، أدخلها يدويًا', 'bad');
+  }).catch(function (e) {
+    S.aiBusy = false; btn.disabled = false; btn.textContent = old;
+    toast(e.message, 'bad');
+  });
+}
+
+/* تقدير عدد السلال وتقييم الجودة */
+function reviewHarvest(btn) {
+  if (!S.photo) return toast('التقط صورة المحصول أولًا', 'bad');
+  if (S.aiBusy) return;
+  S.aiBusy = true;
+  var old = btn.textContent;
+  btn.disabled = true; btn.textContent = 'جارٍ تحليل الصورة…';
+  aiCall('harvest', S.photo).then(function (d) {
+    S.aiBusy = false;
+    S.aiBaskets = Number(d.baskets) || '';
+    S.aiQuality = Number(d.quality) || '';
+    S.aiNotes = d.notes || '';
+    S.aiConf = Number(d.confidence) || 0;
+    render();
+  }).catch(function (e) {
+    S.aiBusy = false; btn.disabled = false; btn.textContent = old;
+    toast(e.message, 'bad');
+  });
+}
+
+function aiHarvestBox() {
+  if (!S.aiBaskets && !S.aiQuality) return '';
+  var mine = S.baskets || 0, ai = Number(S.aiBaskets) || 0;
+  var gap = mine && ai ? Math.abs(ai - mine) / mine : 0;
+  var big = gap > 0.2 && S.aiConf >= 0.4;
+  return '<div class="ai-hint ' + (big ? 'warn' : 'ok') + '">' +
+    '<b>' + (S.aiQuality ? 'جودة المحصول ' + num(S.aiQuality) + '٪' : 'تحليل الصورة') + '</b>' +
+    '<small>' + (S.aiNotes ? esc(S.aiNotes) + ' · ' : '') +
+    (ai ? 'تقدير آلي: ' + num(ai) + ' سلة' + (mine ? ' مقابل ' + num(mine) + ' أدخلتها' : '') : 'تعذّر عدّ السلال') +
+    (big ? ' — الفارق كبير، تأكد من العدد' : '') + '</small></div>';
+}
+
+/* ═══════════ رموز QR ═══════════ */
+function qrSvg(text, size) {
+  try {
+    if (typeof qrcode.stringToBytesFuncs !== 'undefined' && qrcode.stringToBytesFuncs['UTF-8']) {
+      qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+    }
+    var q = qrcode(0, 'M');
+    q.addData(text);
+    q.make();
+    var n = q.getModuleCount(), cell = size / n, r = '';
+    for (var y = 0; y < n; y++) {
+      for (var x = 0; x < n; x++) {
+        if (q.isDark(y, x)) {
+          r += '<rect x="' + (x * cell).toFixed(2) + '" y="' + (y * cell).toFixed(2) +
+               '" width="' + cell.toFixed(2) + '" height="' + cell.toFixed(2) + '"/>';
+        }
+      }
+    }
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + size + ' ' + size +
+      '" width="' + size + '" height="' + size + '" shape-rendering="crispEdges">' +
+      '<rect width="' + size + '" height="' + size + '" fill="#fff"/>' +
+      '<g fill="#14211c">' + r + '</g></svg>';
+  } catch (e) { return '<p class="empty-state">تعذّر توليد الرمز</p>'; }
+}
+
+function labelModal(kind, value, title, sub, caption) {
+  var payload = 'MZR:' + kind + ':' + value;
+  modal('<h3>' + esc(title) + '</h3><p>' + esc(sub) + '</p>' +
+    '<div class="qr-label" id="qrLabel">' + qrSvg(payload, 320) +
+      '<b>' + esc(caption || value) + '</b><small>مزرعة قرضة ورظف للفراولة</small></div>' +
+    '<div class="modal-actions"><button data-act="closeModal">إغلاق</button>' +
+    '<button class="go" data-act="printQR">طباعة</button></div>');
+}
+
+function printLabel() {
+  var el = document.getElementById('qrLabel');
+  if (!el) return;
+  var w = window.open('', '_blank', 'width=420,height=560');
+  if (!w) return toast('اسمح بالنوافذ المنبثقة للطباعة', 'bad');
+  w.document.write('<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">' +
+    '<title>ملصق</title><style>body{font-family:Tahoma,Arial,sans-serif;text-align:center;padding:24px}' +
+    'svg{width:280px;height:280px}b{display:block;font-size:19px;margin-top:14px;letter-spacing:1px}' +
+    'small{display:block;color:#666;margin-top:6px}</style></head><body>' +
+    el.innerHTML + '</body></html>');
+  w.document.close();
+  setTimeout(function () { w.print(); }, 400);
+}
+
+/* الماسح الضوئي */
+var SCAN = { stream: null, raf: 0, cb: null };
+function stopScan() {
+  if (SCAN.raf) { cancelAnimationFrame(SCAN.raf); SCAN.raf = 0; }
+  if (SCAN.stream) { SCAN.stream.getTracks().forEach(function (t) { t.stop(); }); SCAN.stream = null; }
+}
+
+function openScanner(onCode) {
+  modal('<h3>مسح الرمز</h3><p id="scanMsg">جارٍ تشغيل الكاميرا…</p>' +
+    '<div class="cam-stage"><video id="scanVid" playsinline autoplay muted class="hidden"></video>' +
+    '<div class="spin" id="scanSpin"></div><div class="scan-frame hidden" id="scanBox"></div></div>' +
+    '<details class="manual"><summary>إدخال الرقم يدويًا</summary>' +
+      '<label>رقم التشغيلة أو رمز البوابة<input id="scanManual" placeholder="QAR-20260808-001"></label>' +
+      '<button class="mini" data-act="scanManualGo">تأكيد</button></details>' +
+    '<div class="modal-actions"><button data-act="scanClose">إلغاء</button></div>');
+
+  SCAN.cb = onCode;
+  var vid = document.getElementById('scanVid');
+  var msg = document.getElementById('scanMsg');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    msg.textContent = 'الكاميرا غير متاحة على هذا الجهاز';
+    document.getElementById('scanSpin').className = 'spin hidden';
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
+    .then(function (stream) {
+      SCAN.stream = stream;
+      vid.srcObject = stream;
+      vid.className = '';
+      document.getElementById('scanSpin').className = 'spin hidden';
+      document.getElementById('scanBox').className = 'scan-frame';
+      msg.textContent = 'وجّه الكاميرا نحو الرمز';
+      var c = document.createElement('canvas'), ctx = c.getContext('2d', { willReadFrequently: true });
+      (function tick() {
+        if (!SCAN.stream) return;
+        if (vid.readyState === vid.HAVE_ENOUGH_DATA && typeof jsQR === 'function') {
+          c.width = vid.videoWidth; c.height = vid.videoHeight;
+          ctx.drawImage(vid, 0, 0, c.width, c.height);
+          var img = ctx.getImageData(0, 0, c.width, c.height);
+          var hit = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+          if (hit && hit.data) {
+            stopScan(); closeModal();
+            onCode(String(hit.data).trim());
+            return;
+          }
+        }
+        SCAN.raf = requestAnimationFrame(tick);
+      })();
+    })
+    .catch(function () {
+      msg.textContent = 'لم تسمح للمتصفح باستخدام الكاميرا';
+      document.getElementById('scanSpin').className = 'spin hidden';
+    });
+}
+
+/* تفسير الرمز الممسوح */
+function handleCode(code) {
+  var m = /^MZR:(GATE|BATCH):(.+)$/.exec(code);
+  if (!m) return toast('رمز غير معروف: ' + code.slice(0, 30), 'bad');
+  var kind = m[1], value = m[2];
+
+  if (kind === 'GATE') {
+    var name = null;
+    FARM_NAMES.forEach(function (f) { if (FARMS[f].code === value || f === value) name = f; });
+    if (!name) return toast('رمز بوابة غير معروف', 'bad');
+    value = name;
+    S.farm = value; S.gate = value; S.located = true;
+    render();
+    toast('تم تأكيد الحضور في مزرعة ' + value, 'good');
+    return;
+  }
+  var h = S.db.harvests.filter(function (r) { return r.batch === value; })[0];
+  if (!h) return toast('لا توجد تشغيلة بهذا الرقم', 'bad');
+  batchModal(h);
+}
+
+function batchModal(h) {
+  modal('<h3>تشغيلة ' + esc(h.batch) + '</h3><p>مزرعة ' + esc(h.farm) + ' · ' + esc(dt(h.date)) + ' — ' + esc(tm(h.date)) + '</p>' +
+    '<div class="sum-line"><span>عدد السلال</span><b>' + num(h.baskets) + '</b></div>' +
+    (h.aiQuality ? '<div class="sum-line"><span>الجودة المقدَّرة</span><b>' + num(h.aiQuality) + '٪</b></div>' : '') +
+    (h.aiNotes ? '<div class="sum-line"><span>ملاحظة</span><b>' + esc(h.aiNotes) + '</b></div>' : '') +
+    '<div class="sum-line"><span>سجّلها</span><b>' + esc(h.userName) + '</b></div>' +
+    (isVoid(h) ? '<p class="login-error" style="margin-top:14px!important">ملغاة: ' + esc(h.voidReason || '') + '</p>' : '') +
+    '<div class="modal-actions"><button data-act="closeModal">إغلاق</button>' +
+    (h.photo ? '<button class="go" data-act="img" data-id="' + esc(h.photo) + '">عرض الصورة</button>' : '') +
+    '</div>');
+}
+
 /* ═══════════ الموقع الجغرافي ═══════════ */
 function grabGeo() {
   if (!navigator.geolocation) return;
@@ -266,6 +604,12 @@ function stockOf(farm) {
   var d = D(), t = 0;
   d.H.forEach(function (r) { if (r.farm === farm) t += Number(r.baskets) || 0; });
   d.Sa.forEach(function (r) { if (r.farm === farm) t -= Number(r.baskets) || 0; });
+  /* العمليات المحفوظة محليًا تُحتسب حتى لا يُباع أكثر من المتاح دون إنترنت */
+  S.queue.forEach(function (q) {
+    if (q.status !== 'pending' || !q.rec || q.rec.farm !== farm) return;
+    if (q.t2 === 'Harvests') t += Number(q.rec.baskets) || 0;
+    if (q.t2 === 'Sales') t -= Number(q.rec.baskets) || 0;
+  });
   return t;
 }
 function totalStock() { return FARM_NAMES.reduce(function (a, f) { return a + stockOf(f); }, 0); }
@@ -353,8 +697,11 @@ function sidebar() {
       '<span><b>مزرعة قرضة ورظف</b><small>للفراولة</small></span></div>' +
     '<div class="side-user"><span class="side-avatar">' + initial + '</span>' +
       '<span><b>' + esc(S.user.name) + '</b><small>' + roleName(S.user.role) + '</small></span></div>' +
+    netStrip() +
     '<nav class="side-nav">' + NAV.filter(function (n) { return !n[3] || admin; }).map(function (n) {
       var badge = n[0] === 'collect' && late ? '<span class="nav-badge">' + num(late) + '</span>' : '';
+      var pend = pendingCount() + failedCount();
+      if (n[0] === 'log' && pend) badge = '<span class="nav-badge' + (failedCount() ? '' : ' amber') + '">' + num(pend) + '</span>';
       return '<button class="nav-item' + (S.view === n[0] ? ' active' : '') + '" data-act="go" data-v="' + n[0] + '">' +
         '<span class="ni">' + n[1] + '</span><span>' + n[2] + '</span>' + badge + '</button>';
     }).join('') + '</nav>' +
@@ -362,6 +709,18 @@ function sidebar() {
       '<button class="nav-item" data-act="sync"><span class="ni">⟳</span><span>تحديث البيانات</span></button>' +
       '<button class="nav-item danger" data-act="logout"><span class="ni">⏻</span><span>تسجيل الخروج</span></button>' +
     '</div></aside>';
+}
+
+function netStrip() {
+  var pend = pendingCount(), fail = failedCount();
+  if (S.online && !pend && !fail) return '';
+  var cls = !S.online ? 'off' : fail ? 'bad' : 'wait';
+  var txt = !S.online
+    ? 'بدون إنترنت — العمليات تُحفظ محليًا'
+    : fail ? num(fail) + ' عملية فشل رفعها'
+    : 'جارٍ رفع ' + num(pend) + ' عملية…';
+  return '<div class="netstrip ' + cls + '" data-act="go" data-v="log">' +
+    '<span></span>' + esc(txt) + '</div>';
 }
 
 function mobileBar() {
@@ -524,9 +883,15 @@ function viewHarvest() {
       return '<button data-act="farm" data-f="' + esc(f) + '" class="' + (S.farm === f ? 'active' : '') + '"><span>⌖</span>مزرعة ' + esc(f) +
         '<small>' + (S.farm === f && S.located ? 'الأقرب لموقعك' : 'اختيار يدوي') + '</small></button>';
     }).join('') + '</div>' +
-    '<button class="locate" data-act="locate">⌖ تحديد المزرعة من موقعي</button>' +
+    '<div class="two-btn">' +
+      '<button class="locate" data-act="locate">⌖ تحديد من موقعي</button>' +
+      '<button class="locate" data-act="scanGate">▦ مسح رمز البوابة</button></div>' +
+    (S.gate ? '<div class="ai-hint ok"><b>✓ تم تأكيد الحضور في مزرعة ' + esc(S.gate) + '</b>' +
+      '<small>مسحت رمز البوابة، وسيُسجَّل ذلك مع الجولة</small></div>' : '') +
     '<div class="step"><span>2</span><b>صورة المحصول</b></div>' +
     photoBox('صوّر المحصول', 'الكاميرا فقط — لا يمكن الاختيار من الألبوم') +
+    (S.photo ? '<button class="ai-btn" data-act="aiHarvest">✨ حلّل الصورة: عدّ السلال وقيّم الجودة</button>' : '') +
+    aiHarvestBox() +
     '<div class="step"><span>3</span><b>عدد السلال</b></div>' +
     '<div class="counter"><button data-act="dec">−</button><div><strong id="bk">' + num(S.baskets || 0) + '</strong><small>سلة</small></div><button data-act="inc">+</button></div>' +
     '<div class="quick"><button data-act="add5">+5</button><button data-act="add10">+10</button><button data-act="clr">مسح</button></div>' +
@@ -592,11 +957,32 @@ function viewLog() {
         opt('all', 'كل المزارع', ff) + opt('قرضة', 'مزرعة قرضة', ff) + opt('رظف', 'مزرعة رظف', ff) + '</select>' +
       '<input type="date" data-act="lf" data-k="logDay" value="' + esc(fd) + '" max="' + today() + '">' +
       (fd || ft !== 'all' || ff !== 'all' ? '<button class="mini" data-act="lfClear">مسح الفلاتر</button>' : '') +
+      '<button class="mini" data-act="scanAny">▦ مسح رمز</button>' +
     '</div>' +
+    queuePanel() +
     '<p class="cam-meta" style="text-align:right">' + num(shown.length) + ' عملية من أصل ' + num(ops.length) + '</p>' +
     (shown.length ? shown.map(logCard).join('') : '<p class="empty-state">لا توجد عمليات مطابقة.</p>') +
   '</section>';
 }
+function queuePanel() {
+  if (!S.queue.length) return '';
+  var names = { Harvests: 'جولة قطاف', Sales: 'عملية بيع', Expenses: 'مصروف', Payments: 'تحصيل' };
+  return '<div class="qpanel">' +
+    '<div class="qhead"><b>عمليات لم تُرفع بعد (' + num(S.queue.length) + ')</b>' +
+      (failedCount() ? '<button class="mini" data-act="retryQ">إعادة المحاولة</button>' : '') + '</div>' +
+    S.queue.map(function (q) {
+      var v = q.rec || {};
+      var line = q.t2 === 'Harvests' ? num(v.baskets) + ' سلة · ' + esc(v.farm || '')
+        : q.t2 === 'Sales' ? num(v.baskets) + ' سلة · ' + riyal(v.gross)
+        : q.t2 === 'Expenses' ? riyal(v.amount) + ' · ' + esc(v.category || '')
+        : riyal(v.amount);
+      return '<div class="qrow ' + q.status + '"><span class="qdot"></span>' +
+        '<div><b>' + esc(names[q.t2] || q.t2) + '</b><small>' + line + ' · ' + esc(ago(q.at)) + '</small>' +
+        (q.status === 'failed' ? '<em>' + esc(q.error) + '</em>' : '') + '</div>' +
+        '<button class="mini danger" data-act="dropQ" data-id="' + esc(q.id) + '">حذف</button></div>';
+    }).join('') + '</div>';
+}
+
 function opt(v, label, cur) {
   return '<option value="' + esc(v) + '"' + (cur === v ? ' selected' : '') + '>' + esc(label) + '</option>';
 }
@@ -622,6 +1008,18 @@ function logCard(o) {
     chips.push('<span class="chip ' + (r.device === 'camera' ? 'ok' : 'warn') + '">' +
       (r.device === 'camera' ? '✓ كاميرا مباشرة' : r.device === 'file' ? '⚠ صورة من ملف' : 'صورة') + '</span>');
     chips.push('<button class="chip btn" data-act="img" data-id="' + esc(r.photo) + '">عرض الصورة</button>');
+  }
+  if (o.t === 'harvest' && r.gate) chips.push('<span class="chip ok">✓ رمز البوابة</span>');
+  if (o.t === 'harvest' && r.aiQuality) {
+    chips.push('<span class="chip">جودة ' + num(r.aiQuality) + '٪</span>');
+  }
+  if (o.t === 'harvest' && Number(r.aiBaskets) > 0) {
+    var mine = Number(r.baskets) || 0, est = Number(r.aiBaskets);
+    var off = mine ? Math.abs(est - mine) / mine : 0;
+    if (off > 0.2) chips.push('<span class="chip warn">تقدير آلي ' + num(est) + ' سلة</span>');
+  }
+  if (o.t === 'harvest') {
+    chips.push('<button class="chip btn" data-act="label" data-b="' + esc(r.batch) + '">ملصق QR</button>');
   }
   if (r.capturedAt && Math.abs(new Date(r.date) - new Date(r.capturedAt)) > 300000) {
     chips.push('<span class="chip warn">وقت الجهاز ' + esc(tm(r.capturedAt)) + '</span>');
@@ -687,6 +1085,8 @@ function viewExpense() {
   return '<section class="flow-page">' + head('تسجيل فاتورة', 'صوّر الفاتورة ثم أكد بيانات المصروف') +
   '<div class="flow-grid"><div class="form-card">' +
     photoBox('صوّر الفاتورة أو الإيصال', 'الكاميرا فقط') +
+    (S.photo ? '<button class="ai-btn" data-act="aiInvoice">✨ اقرأ الفاتورة تلقائيًا</button>' : '') +
+    '<div id="aiHint"></div>' +
     '<div class="two"><label>المبلغ (ر.س)<input id="eAmt" type="number" inputmode="decimal" min="0" step="0.01"></label>' +
     '<label>التصنيف<select id="eCat">' + CATEGORIES.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('') + '</select></label></div>' +
     '<label>المزرعة المستفيدة<select id="eFarm"><option value="قرضة">مزرعة قرضة</option><option value="رظف">مزرعة رظف</option><option value="مشترك">مشترك بين المزرعتين</option></select></label>' +
@@ -730,7 +1130,7 @@ function aside(title, items) {
 /* ═══════════ لوحة الإدارة ═══════════ */
 var TABS = [
   ['overview', 'نظرة عامة'], ['harvests', 'الإنتاج'], ['sales', 'المبيعات'],
-  ['expenses', 'المصروفات'], ['partners', 'الشركاء'], ['users', 'المستخدمون']
+  ['expenses', 'المصروفات'], ['partners', 'الشركاء'], ['users', 'المستخدمون'], ['tools', 'الرموز والأدوات']
 ];
 
 function viewAdmin() {
@@ -740,7 +1140,7 @@ function viewAdmin() {
     }).join('') + '</div>' +
     (S.tab === 'harvests' ? tabHarvests() : S.tab === 'sales' ? tabSales() :
      S.tab === 'expenses' ? tabExpenses() : S.tab === 'partners' ? tabPartners() :
-     S.tab === 'users' ? tabUsers() : tabOverview()) +
+     S.tab === 'users' ? tabUsers() : S.tab === 'tools' ? tabTools() : tabOverview()) +
   '</section>';
 }
 
@@ -874,6 +1274,28 @@ function tabUsers() {
     '<button class="addbtn" data-act="newUser">+ إضافة مستخدم جديد</button></div>';
 }
 
+function tabTools() {
+  return '<div class="chart-card"><h2>رموز بوابات المزارع</h2>' +
+    '<p class="password-hint" style="margin:0 0 16px!important">اطبع رمز كل مزرعة وثبّته عند البوابة. مسحه أثناء تسجيل القطاف يثبت الحضور الفعلي في الموقع — أقوى من الموقع الجغرافي لأنه لا يمكن تزويره من مكان آخر.</p>' +
+    FARM_NAMES.map(function (f) {
+      return '<div class="userrow"><div><b>مزرعة ' + esc(f) + '</b>' +
+        '<small>' + FARMS[f].lat + ', ' + FARMS[f].lng + ' · رمز ' + FARMS[f].code + '</small></div>' +
+        '<button class="mini" data-act="gateLabel" data-f="' + esc(f) + '">عرض وطباعة الرمز</button></div>';
+    }).join('') +
+    '</div>' +
+    '<div class="chart-card" style="margin-top:15px"><h2>الذكاء الاصطناعي</h2>' +
+      '<p class="password-hint" style="margin:0 0 14px!important">قراءة الفواتير وتقدير عدد السلال وتقييم الجودة تعمل عبر Gemini. تُضبط بمفتاح مجاني في إعدادات الخادم.</p>' +
+      '<div class="sum-line"><span>الحالة</span><span id="aiState">' +
+        (S.aiState || '<button class="mini" data-act="aiPing">فحص الاتصال</button>') + '</span></div>' +
+    '</div>' +
+    '<div class="chart-card" style="margin-top:15px"><h2>التطبيق</h2>' +
+      '<div class="sum-line"><span>وضع العمل بدون إنترنت</span><span>' +
+        ('serviceWorker' in navigator ? 'مفعّل' : 'غير مدعوم في هذا المتصفح') + '</span></div>' +
+      '<div class="sum-line"><span>عمليات لم تُرفع</span><span>' + num(S.queue.length) + '</span></div>' +
+      (S.cachedAt ? '<div class="sum-line"><span>آخر نسخة محفوظة محليًا</span><span>' + esc(dt(S.cachedAt)) + ' — ' + esc(tm(S.cachedAt)) + '</span></div>' : '') +
+    '</div>';
+}
+
 function isVoid(r) { return r['void'] === true || r['void'] === 'TRUE'; }
 function byDateDesc(a, b) { return String(b.date).localeCompare(String(a.date)); }
 function rowAction(r, table) {
@@ -883,7 +1305,7 @@ function rowAction(r, table) {
 }
 
 /* ═══════════ النوافذ ═══════════ */
-function closeModal() { camStop(); modalBox.innerHTML = ''; }
+function closeModal() { camStop(); stopScan(); modalBox.innerHTML = ''; }
 function modal(html) {
   modalBox.innerHTML = '<div class="modal" data-act="backdrop"><div class="modal-card">' + html + '</div></div>';
 }
@@ -918,6 +1340,38 @@ document.addEventListener('click', function (e) {
   if (a === 'menuClose') { S.menu = false; render(); return; }
   if (a === 'camOpen') return openCamera(el.getAttribute('data-title') || 'التقاط صورة');
   if (a === 'lf') return;
+  if (a === 'aiPing') {
+    el.disabled = true; el.textContent = 'جارٍ الفحص…';
+    call('ai', { mode: 'ping' })
+      .then(function (d) { S.aiState = '<span class="tag">متصل · ' + esc(d.model || '') + '</span>'; render(); })
+      .catch(function (e) { S.aiState = '<span class="tag red">' + esc(e.message) + '</span>'; render(); });
+    return;
+  }
+  if (a === 'aiInvoice') return readInvoice(el);
+  if (a === 'aiHarvest') return reviewHarvest(el);
+  if (a === 'scanGate') return openScanner(handleCode);
+  if (a === 'scanAny') return openScanner(handleCode);
+  if (a === 'scanClose') { stopScan(); closeModal(); return; }
+  if (a === 'scanManualGo') {
+    var raw = (val('scanManual') || '').trim();
+    if (!raw) return toast('اكتب الرقم أولًا', 'bad');
+    var code = /^MZR:/.test(raw) ? raw
+      : /^(QAR|RAD)$/i.test(raw) ? 'MZR:GATE:' + raw.toUpperCase()
+      : 'MZR:BATCH:' + raw.toUpperCase();
+    var cb = SCAN.cb;
+    stopScan(); closeModal();
+    if (cb) cb(code);
+    return;
+  }
+  if (a === 'label') { var bt = el.getAttribute('data-b'); labelModal('BATCH', bt, 'ملصق التشغيلة', 'الصقه على الصندوق — يُمسح لعرض تفاصيل الجولة'); return; }
+  if (a === 'gateLabel') {
+    var gf = el.getAttribute('data-f');
+    labelModal('GATE', FARMS[gf].code, 'رمز بوابة مزرعة ' + gf, 'ثبّته عند بوابة المزرعة — مسحه يؤكد الحضور', 'مزرعة ' + gf);
+    return;
+  }
+  if (a === 'printQR') return printLabel();
+  if (a === 'retryQ') { retryFailed(); return; }
+  if (a === 'dropQ') { dropQueued(el.getAttribute('data-id')); return; }
   if (a === 'lfClear') { S.logType = 'all'; S.logFarm = 'all'; S.logDay = ''; render(); return; }
   if (a === 'go') {
     S.view = el.getAttribute('data-v'); S.menu = false; resetForm();
@@ -955,6 +1409,7 @@ function setBaskets(n) {
 function resetForm() {
   camStop();
   S.photo = null; S.photoSource = ''; S.photoAt = ''; S.photoGeo = null;
+  S.aiBaskets = ''; S.aiQuality = ''; S.aiNotes = ''; S.aiBusy = false; S.gate = '';
   S.baskets = 0; S.ptype = 'cash';
 }
 
@@ -1004,7 +1459,8 @@ function guard(btn, label, promise) {
   S.busy = true; btn.disabled = true;
   var old = btn.textContent; btn.textContent = 'جارٍ الحفظ…';
   promise.then(function (msg) {
-    return refresh().then(function () {
+    /* فشل التحديث بعد الحفظ لا يعني فشل الحفظ — خاصة بلا إنترنت */
+    return refresh().catch(function () {}).then(function () {
       S.busy = false; resetForm(); S.view = 'home'; render(); toast(msg, 'good');
     });
   }).catch(function (x) {
@@ -1016,10 +1472,13 @@ function guard(btn, label, promise) {
 function saveHarvest(btn) {
   if (!S.photo) return toast('التقط صورة المحصول أولًا', 'bad');
   if (!(S.baskets > 0)) return toast('أدخل عدد السلال', 'bad');
-  guard(btn, 'حفظ جولة القطاف', call('add', {
-    t2: 'Harvests', img: S.photo,
-    rec: mix({ farm: S.farm, code: FARMS[S.farm].code, baskets: S.baskets })
-  }).then(function (d) { return 'تم حفظ الجولة · ' + d.batch; }));
+  guard(btn, 'حفظ جولة القطاف', submitOp('Harvests',
+    mix({ farm: S.farm, code: FARMS[S.farm].code, baskets: S.baskets,
+          aiBaskets: S.aiBaskets, aiQuality: S.aiQuality, aiNotes: S.aiNotes, gate: S.gate }),
+    S.photo
+  ).then(function (d) {
+    return d.queued ? 'حُفظت الجولة محليًا وستُرفع عند عودة الإنترنت' : 'تم حفظ الجولة · ' + d.batch;
+  }));
 }
 
 function saveSale(btn) {
@@ -1038,21 +1497,26 @@ function saveSale(btn) {
     if (!rec.customer) return toast('أدخل اسم العميل', 'bad');
     if (!rec.due) return toast('أدخل تاريخ الاستحقاق', 'bad');
   }
-  guard(btn, 'حفظ عملية البيع', call('add', { t2: 'Sales', rec: rec })
-    .then(function (d) { return 'تم تسجيل البيع · صافي ' + riyal(d.net); }));
+  guard(btn, 'حفظ عملية البيع', submitOp('Sales', rec, '')
+    .then(function (d) {
+      return d.queued ? 'حُفظ البيع محليًا وسيُرفع عند عودة الإنترنت'
+                      : 'تم تسجيل البيع · صافي ' + riyal(d.net);
+    }));
 }
 
 function saveExpense(btn) {
   if (!S.photo) return toast('صوّر الفاتورة أولًا', 'bad');
   var amt = Math.round(numOf(val('eAmt')) * 100);
   if (!(amt > 0)) return toast('أدخل مبلغ المصروف', 'bad');
-  guard(btn, 'حفظ المصروف', call('add', {
-    t2: 'Expenses', img: S.photo,
-    rec: mix({
+  guard(btn, 'حفظ المصروف', submitOp('Expenses',
+    mix({
       amount: amt, category: val('eCat'), farm: val('eFarm'),
       payer: val('ePayer'), notes: (val('eNotes') || '').trim()
-    })
-  }).then(function () { return 'تم حفظ المصروف'; }));
+    }),
+    S.photo
+  ).then(function (d) {
+    return d.queued ? 'حُفظ المصروف محليًا وسيُرفع عند عودة الإنترنت' : 'تم حفظ المصروف';
+  }));
 }
 
 /* ── النوافذ التفاعلية ── */
@@ -1167,21 +1631,71 @@ function doLogout() {
 function refresh() {
   return call('all', {}).then(function (d) {
     S.user = d.user;
-    S.db = { harvests: d.harvests || [], sales: d.sales || [], expenses: d.expenses || [], payments: d.payments || [], users: d.users || [] };
+    S.db = { harvests: d.harvests || [], sales: d.sales || [], expenses: d.expenses || [],
+             payments: d.payments || [], users: d.users || [] };
+    idbPut('cache', { key: 'db', user: d.user, db: S.db, at: new Date().toISOString() });
     return d;
   });
 }
 
-function boot() {
-  if (!apiReady()) { S.user = null; render(); return; }
-  if (S.token) {
-    refresh().then(function () { S.view = 'home'; render(); })
-      .catch(function () { S.token = ''; localStorage.removeItem('mzr_token'); boot(); });
-    return;
+/* عند غياب الشبكة نعرض آخر نسخة محفوظة بدل شاشة فارغة */
+function loadCache() {
+  return idbDo('cache', 'readonly', function (st) { return st.get('db'); }).then(function (c) {
+    if (!c || !c.db) return false;
+    S.user = c.user; S.db = c.db; S.cachedAt = c.at;
+    return true;
+  });
+}
+
+function watchNet() {
+  function set(on) {
+    S.online = on;
+    render();
+    if (on) syncQueue(true);
   }
-  S.authMode = 'loading'; render();
-  call('status', {}).then(function (d) { S.authMode = d.needsSetup ? 'setup' : 'login'; render(); })
-    .catch(function (x) { S.authMode = 'login'; render(); toast(x.message, 'bad'); });
+  window.addEventListener('online', function () { set(true); });
+  window.addEventListener('offline', function () { set(false); });
+  setInterval(function () {
+    if (navigator.onLine !== S.online) set(navigator.onLine);
+    else if (navigator.onLine) syncQueue(false);
+  }, 45000);
+}
+
+function registerSW() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('sw.js').catch(function () {});
+}
+
+function boot() {
+  registerSW();
+  watchNet();
+  if (!apiReady()) { S.user = null; render(); return; }
+
+  loadQueue().then(function () {
+    if (S.token) {
+      return refresh()
+        .then(function () { S.view = 'home'; render(); syncQueue(false); })
+        .catch(function (e) {
+          if (e.offline) {
+            return loadCache().then(function (ok) {
+              if (ok) { S.view = 'home'; render(); toast('بدون إنترنت — تُعرض آخر نسخة محفوظة'); }
+              else { S.authMode = 'login'; S.user = null; render(); toast(e.message, 'bad'); }
+            });
+          }
+          S.token = ''; localStorage.removeItem('mzr_token');
+          S.user = null;
+          return askStatus();
+        });
+    }
+    S.authMode = 'loading'; render();
+    return askStatus();
+  });
+}
+
+function askStatus() {
+  return call('status', {})
+    .then(function (d) { S.authMode = d.needsSetup ? 'setup' : 'login'; render(); })
+    .catch(function (x) { S.authMode = 'login'; render(); if (!x.offline) toast(x.message, 'bad'); });
 }
 
 boot();

@@ -191,3 +191,45 @@ table.data tbody tr:hover{background:var(--cream)}
 }
 input[type="date"]{direction:ltr;text-align:right}
 .filters input[type="date"]{min-height:44px}
+
+/* ===== حالة الاتصال والطابور ===== */
+.netstrip{display:flex;align-items:center;gap:9px;border-radius:12px;padding:11px 13px;font-size:12.5px;font-weight:700;margin-bottom:14px;cursor:pointer;border:0;width:100%;text-align:right;font-family:inherit}
+.netstrip span{width:9px;height:9px;border-radius:50%;flex:none}
+.netstrip.off{background:#f3f4f4;color:var(--muted)}
+.netstrip.off span{background:var(--muted)}
+.netstrip.wait{background:#fff8e8;color:#7a571e}
+.netstrip.wait span{background:var(--gold);animation:pulse 1.4s infinite}
+.netstrip.bad{background:var(--redbg);color:var(--red)}
+.netstrip.bad span{background:var(--red)}
+@keyframes pulse{50%{opacity:.25}}
+.nav-badge.amber{background:var(--gold)}
+.qpanel{background:#fff;border:1px solid var(--line);border-radius:15px;padding:16px;margin-bottom:16px}
+.qhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.qhead b{font-size:14px}
+.qrow{display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.qrow b,.qrow small,.qrow em{display:block}
+.qrow b{font-size:13px}
+.qrow small{color:var(--muted);font-size:11px;margin-top:4px}
+.qrow em{color:var(--red);font-size:11px;font-style:normal;margin-top:4px}
+.qdot{width:9px;height:9px;border-radius:50%;background:var(--gold)}
+.qrow.failed .qdot{background:var(--red)}
+
+/* ===== الذكاء الاصطناعي والرموز ===== */
+.ai-btn{width:100%;border:1px solid var(--green2);background:var(--mint);color:var(--green);border-radius:12px;padding:13px;font:inherit;font-weight:700;font-size:14px;cursor:pointer;margin-bottom:14px}
+.ai-btn:disabled{opacity:.6;cursor:wait}
+.ai-hint{border-radius:12px;padding:12px 14px;margin-bottom:16px;font-size:13px}
+.ai-hint b{display:block;font-size:13.5px}
+.ai-hint small{display:block;margin-top:5px;line-height:1.75}
+.ai-hint.ok{background:var(--mint);color:var(--green)}
+.ai-hint.warn{background:#fff8e8;color:#7a571e}
+.two-btn{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.two-btn .locate{border:1px solid var(--line);border-radius:11px;background:#fff}
+.qr-label{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;text-align:center;margin-bottom:16px}
+.qr-label svg{width:min(260px,60vw);height:auto;display:block;margin:0 auto}
+.qr-label b{display:block;margin-top:12px;font-size:17px;letter-spacing:1px;direction:ltr}
+.qr-label small{display:block;color:var(--muted);margin-top:5px}
+.scan-frame{position:absolute;inset:14%;border:3px solid #ffffffcc;border-radius:16px;box-shadow:0 0 0 100vmax #00000055;pointer-events:none}
+.manual{margin:-4px 0 14px;border:1px solid var(--line);border-radius:11px;padding:11px 13px}
+.manual summary{cursor:pointer;font-size:13px;font-weight:700;color:var(--green)}
+.manual label{margin:12px 0 8px}
+.manual input{direction:ltr;text-align:left}

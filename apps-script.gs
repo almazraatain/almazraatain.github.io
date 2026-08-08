@@ -5,7 +5,7 @@ var PHOTOS = 'almazraatain-photos';
 var COLS = {
   Users: ['id','phone','name','role','hash','active','created'],
   Sessions: ['token','userId','expires'],
-  Harvests: ['id','date','capturedAt','farm','baskets','batch','photo','lat','lng','device','userId','userName','void','voidReason'],
+  Harvests: ['id','date','capturedAt','farm','baskets','batch','photo','lat','lng','device','gate','aiBaskets','aiQuality','aiNotes','userId','userName','void','voidReason'],
   Sales: ['id','date','capturedAt','farm','baskets','gross','commission','transport','net','ptype','customer','due','lat','lng','device','userId','userName','void','voidReason'],
   Expenses: ['id','date','capturedAt','category','amount','farm','payer','notes','photo','lat','lng','device','userId','userName','void','voidReason'],
   Payments: ['id','date','saleId','amount','method','userId','userName','void','voidReason'],
@@ -28,6 +28,7 @@ function doPost(e) {
     if (b.a === 'add') return j(add(b, u));
     if (b.a === 'void') return j(voidRow(b, u));
     if (b.a === 'img') return j(img(b));
+    if (b.a === 'ai') return j(aiRun(b, u));
     if (b.a === 'adduser') return j(addUser(b, u));
     if (b.a === 'setuser') return j(setUser(b, u));
     if (b.a === 'logout') return j(logout(b));
@@ -41,25 +42,44 @@ function j(o) {
 
 /* الأعمدة الرقمية والمنطقية تبقى بصيغتها، وكل ما عداها يُجبر كنص صريح
    حتى لا تحوّل Sheets رقم الجوال (+966...) لمعادلة أو التواريخ لصيغة أخرى. */
-var NUMCOLS = ['baskets','gross','commission','transport','net','amount','lat','lng'];
+var NUMCOLS = ['baskets','gross','commission','transport','net','amount','lat','lng','aiBaskets','aiQuality'];
 var BOOLCOLS = ['active','void'];
 
 function sh(n) {
   var s = SS.getSheetByName(n);
-  if (!s) { s = SS.insertSheet(n); initSheet(s, n); }
-  else if (s.getLastRow() === 0) { initSheet(s, n); }
+  if (!s) { s = SS.insertSheet(n); initSheet(s, n); return s; }
+  if (s.getLastRow() === 0) { initSheet(s, n); return s; }
+  migrate(s, n);
   return s;
 }
 
+function fmtCol(s, n, i) {
+  var c = COLS[n][i];
+  if (NUMCOLS.indexOf(c) < 0 && BOOLCOLS.indexOf(c) < 0) {
+    s.getRange(1, i + 1, s.getMaxRows(), 1).setNumberFormat('@');
+  }
+}
+
 function initSheet(s, n) {
-  var head = COLS[n];
-  for (var i = 0; i < head.length; i++) {
-    if (NUMCOLS.indexOf(head[i]) < 0 && BOOLCOLS.indexOf(head[i]) < 0) {
-      s.getRange(1, i + 1, s.getMaxRows(), 1).setNumberFormat('@');
+  for (var i = 0; i < COLS[n].length; i++) fmtCol(s, n, i);
+  s.appendRow(COLS[n]);
+  s.setFrozenRows(1);
+}
+
+/* يضيف أي أعمدة جديدة لجدول قائم دون المساس بالبيانات الموجودة */
+function migrate(s, n) {
+  var want = COLS[n], have = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+  if (have.length >= want.length) {
+    var same = true;
+    for (var j = 0; j < want.length; j++) if (String(have[j]) !== want[j]) { same = false; break; }
+    if (same) return;
+  }
+  for (var i = 0; i < want.length; i++) {
+    if (String(have[i] || '') !== want[i]) {
+      fmtCol(s, n, i);
+      s.getRange(1, i + 1).setValue(want[i]);
     }
   }
-  s.appendRow(head);
-  s.setFrozenRows(1);
 }
 
 function rows(n) {
@@ -247,7 +267,10 @@ function add(b, u) {
       var batch = batchNo(r.farm, r.code);
       append('Harvests', { id: id, date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
         baskets: Number(r.baskets), batch: batch, photo: upload(b.img, id),
-        lat: r.lat || '', lng: r.lng || '', device: r.device || '',
+        lat: r.lat || '', lng: r.lng || '', device: r.device || '', gate: r.gate || '',
+        aiBaskets: r.aiBaskets === undefined || r.aiBaskets === '' ? '' : Number(r.aiBaskets),
+        aiQuality: r.aiQuality === undefined || r.aiQuality === '' ? '' : Number(r.aiQuality),
+        aiNotes: r.aiNotes || '',
         userId: u.id, userName: u.name, 'void': false, voidReason: '' });
       log(u, 'harvest', batch + ' / ' + r.baskets);
       return { ok: 1, id: id, batch: batch };
@@ -315,6 +338,108 @@ function addUser(b, u) {
     hash: salt + '$' + hash(b.pass, salt), active: true, created: now() });
   log(u, 'adduser', b.phone + ' / ' + b.role);
   return { ok: 1 };
+}
+
+/* ═══════════ الذكاء الاصطناعي (Gemini) ═══════════
+   المفتاح يُحفظ في Project Settings > Script Properties باسم GEMINI_KEY
+   ولا يُكتب داخل الكود إطلاقًا. */
+
+function gKey() { return PropertiesService.getScriptProperties().getProperty('GEMINI_KEY'); }
+
+/* يكتشف نموذجًا صالحًا من مفتاح المستخدم ويحفظه، فلا يتعطل لو تغيرت الأسماء */
+function gModel(force) {
+  var props = PropertiesService.getScriptProperties();
+  if (!force) {
+    var saved = props.getProperty('GEMINI_MODEL');
+    if (saved) return saved;
+  }
+  var res = UrlFetchApp.fetch(
+    'https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(gKey()),
+    { muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) return null;
+  var list = (JSON.parse(res.getContentText()).models) || [];
+  var usable = [];
+  for (var i = 0; i < list.length; i++) {
+    var m = list[i], methods = m.supportedGenerationMethods || m.supportedActions || [];
+    if (methods.indexOf('generateContent') < 0) continue;
+    var name = String(m.name).replace('models/', '');
+    if (name.indexOf('embedding') >= 0 || name.indexOf('imagen') >= 0) continue;
+    usable.push(name);
+  }
+  /* الأفضلية للأخف والأسرع لأن الباقة المجانية أسخى معها */
+  var order = ['flash-lite', 'flash', 'pro'];
+  for (var o = 0; o < order.length; o++) {
+    for (var k = 0; k < usable.length; k++) {
+      if (usable[k].indexOf(order[o]) >= 0) {
+        props.setProperty('GEMINI_MODEL', usable[k]);
+        return usable[k];
+      }
+    }
+  }
+  if (usable.length) { props.setProperty('GEMINI_MODEL', usable[0]); return usable[0]; }
+  return null;
+}
+
+function gJson(prompt, b64, retried) {
+  var key = gKey();
+  if (!key) return { error: 'NO_AI_KEY' };
+  var model = gModel(false);
+  if (!model) return { error: 'NO_AI_MODEL' };
+
+  var parts = [{ text: prompt }];
+  if (b64) parts.push({ inline_data: { mime_type: 'image/jpeg', data: b64 } });
+
+  var res = UrlFetchApp.fetch(
+    'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(key),
+    {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      payload: JSON.stringify({
+        contents: [{ role: 'user', parts: parts }],
+        generationConfig: { temperature: 0.1, responseMimeType: 'application/json' }
+      })
+    });
+
+  var code = res.getResponseCode(), body = res.getContentText();
+  if (code === 404 && !retried) {
+    PropertiesService.getScriptProperties().deleteProperty('GEMINI_MODEL');
+    gModel(true);
+    return gJson(prompt, b64, true);
+  }
+  if (code === 429) return { error: 'AI_QUOTA' };
+  if (code !== 200) return { error: 'AI_FAIL', detail: body.substring(0, 300) };
+
+  try {
+    var txt = JSON.parse(body).candidates[0].content.parts[0].text;
+    return { ok: 1, data: JSON.parse(txt) };
+  } catch (x) { return { error: 'AI_PARSE' }; }
+}
+
+var P_INVOICE =
+  'أنت محاسب. اقرأ صورة الفاتورة وأعد JSON فقط بهذه الحقول: ' +
+  '{"amount": المبلغ الإجمالي النهائي بالريال كرقم عشري بدون رمز عملة, ' +
+  '"supplier": اسم المورّد أو المتجر كنص, ' +
+  '"date": التاريخ بصيغة YYYY-MM-DD أو "" إن لم يظهر, ' +
+  '"category": واحدة فقط من [أسمدة ومغذيات, مياه وري, عمالة, نقل, صيانة, بذور وشتلات, مصروف آخر], ' +
+  '"confidence": ثقتك من 0 إلى 1}. ' +
+  'إن لم تجد المبلغ فاجعل amount = 0. لا تكتب أي شرح خارج JSON.';
+
+var P_HARVEST =
+  'أنت خبير جودة فراولة. حلّل صورة محصول الفراولة وأعد JSON فقط: ' +
+  '{"baskets": تقديرك لعدد السلال الظاهرة كرقم صحيح, ' +
+  '"quality": تقييم الجودة من 0 إلى 100 بناءً على اللون والنضج والتلف والحجم, ' +
+  '"notes": جملة عربية قصيرة جدًا (أقل من 12 كلمة) تصف الحالة, ' +
+  '"confidence": ثقتك في عدد السلال من 0 إلى 1}. ' +
+  'إن تعذر عدّ السلال فاجعل baskets = 0 و confidence = 0. لا تكتب أي شرح خارج JSON.';
+
+function aiRun(b, u) {
+  if (b.mode === 'invoice') return gJson(P_INVOICE, b.img);
+  if (b.mode === 'harvest') return gJson(P_HARVEST, b.img);
+  if (b.mode === 'ping') {
+    if (!gKey()) return { error: 'NO_AI_KEY' };
+    var m = gModel(false);
+    return m ? { ok: 1, model: m } : { error: 'NO_AI_MODEL' };
+  }
+  return { error: 'BAD_ACTION' };
 }
 
 function setUser(b, u) {
