@@ -133,17 +133,42 @@ function setup(b) {
   return { ok: 1, t: mkToken(id), user: user };
 }
 
+/* حد المحاولات: 5 محاولات فاشلة تقفل الرقم 15 دقيقة */
+var MAX_TRIES = 5;
+var LOCK_MIN = 15;
+
+function tries(phone) {
+  var p = PropertiesService.getScriptProperties().getProperty('f_' + phone);
+  return p ? JSON.parse(p) : { n: 0, at: 0 };
+}
+
+function bump(phone, ok) {
+  var props = PropertiesService.getScriptProperties();
+  if (ok) { props.deleteProperty('f_' + phone); return; }
+  var rec = tries(phone);
+  rec.n++; rec.at = Date.now();
+  props.setProperty('f_' + phone, JSON.stringify(rec));
+}
+
 function login(b) {
+  var phone = String(b.phone);
+  var rec = tries(phone);
+  var mins = (Date.now() - rec.at) / 60000;
+  if (rec.n >= MAX_TRIES && mins < LOCK_MIN) return { error: 'LOCKED' };
+  if (mins >= LOCK_MIN) bump(phone, true);
+
   var us = rows('Users');
   for (var i = 0; i < us.length; i++) {
     var u = us[i];
-    if (String(u.phone) === String(b.phone) && u.active === true) {
+    if (String(u.phone) === phone && u.active === true) {
       var parts = String(u.hash).split('$');
       if (hash(b.pass, parts[0]) === parts[1]) {
+        bump(phone, true);
         return { ok: 1, t: mkToken(u.id), user: { id: u.id, name: u.name, role: u.role } };
       }
     }
   }
+  bump(phone, false);
   return { error: 'BAD_LOGIN' };
 }
 
