@@ -124,7 +124,7 @@ function auth(token) {
     if (ss[i].token === token && String(ss[i].expires) > now()) {
       var us = rows('Users');
       for (var u = 0; u < us.length; u++) {
-        if (us[u].id === ss[i].userId && us[u].active === true) return us[u];
+        if (us[u].id === ss[i].userId && isTrue(us[u].active)) return us[u];
       }
     }
   }
@@ -170,6 +170,29 @@ function bump(phone, ok) {
   props.setProperty('f_' + phone, JSON.stringify(rec));
 }
 
+/* مقارنة الجوال بالأرقام فقط — تنجح حتى لو أزالت Sheets علامة + */
+function digitsOf(v) {
+  var s = String(v === undefined || v === null ? '' : v);
+  /* Sheets قد تعرض الأرقام الطويلة بصيغة علمية مثل 9.665E+11 */
+  if (/^\d+(\.\d+)?[eE][+-]?\d+$/.test(s)) {
+    var n = Number(s);
+    if (isFinite(n)) s = n.toFixed(0);
+  }
+  return s.replace(/[^0-9]/g, '');
+}
+function samePhone(a, b) {
+  var x = digitsOf(a), y = digitsOf(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  /* 0501234567 مقابل 966501234567 */
+  var nx = x.indexOf('966') === 0 ? x.substring(3) : x.replace(/^0/, '');
+  var ny = y.indexOf('966') === 0 ? y.substring(3) : y.replace(/^0/, '');
+  return nx === ny && nx.length >= 9;
+}
+
+/* الحقول المنطقية قد تعود نصًا من Sheets */
+function isTrue(v) { return v === true || String(v).toUpperCase() === 'TRUE'; }
+
 function login(b) {
   var phone = String(b.phone);
   var rec = tries(phone);
@@ -180,7 +203,7 @@ function login(b) {
   var us = rows('Users');
   for (var i = 0; i < us.length; i++) {
     var u = us[i];
-    if (String(u.phone) === phone && u.active === true) {
+    if (samePhone(u.phone, phone) && isTrue(u.active)) {
       var parts = String(u.hash).split('$');
       if (hash(b.pass, parts[0]) === parts[1]) {
         bump(phone, true);
@@ -332,7 +355,7 @@ function addUser(b, u) {
   if (u.role !== 'admin') return { error: 'NOT_ADMIN' };
   if (!b.pass || b.pass.length < 8) return { error: 'SHORT_PASS' };
   var us = rows('Users');
-  for (var i = 0; i < us.length; i++) if (String(us[i].phone) === String(b.phone)) return { error: 'DUP_PHONE' };
+  for (var i = 0; i < us.length; i++) if (samePhone(us[i].phone, b.phone)) return { error: 'DUP_PHONE' };
   var salt = uid();
   append('Users', { id: uid(), phone: b.phone, name: b.name, role: b.role || 'operator',
     hash: salt + '$' + hash(b.pass, salt), active: true, created: now() });
@@ -460,4 +483,43 @@ function setUser(b, u) {
     }
   }
   return { error: 'NOT_FOUND' };
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   نسيت كلمة المرور؟
+   شغّل هذه الدالة من محرر Apps Script: اختر resetAdminPassword
+   من قائمة الدوال ثم اضغط Run، وستظهر لك في السجل (Execution log)
+   كلمة مرور جديدة ورقم الجوال المسجّل بالضبط.
+   آمنة لأنها تتطلب الدخول لحسابك في Google — لا يمكن استدعاؤها من الويب.
+   ═══════════════════════════════════════════════════════ */
+function resetAdminPassword() {
+  var us = rows('Users');
+  if (!us.length) { Logger.log('لا يوجد مستخدمون. افتح الموقع وأنشئ حساب المدير.'); return; }
+  var s = sh('Users');
+  var target = us[0];
+  for (var i = 0; i < us.length; i++) if (us[i].role === 'admin') { target = us[i]; break; }
+
+  var pass = 'Mzr' + uid().substring(0, 9);
+  var salt = uid();
+  s.getRange(target._row, COLS.Users.indexOf('hash') + 1).setValue(salt + '$' + hash(pass, salt));
+  s.getRange(target._row, COLS.Users.indexOf('active') + 1).setValue(true);
+  PropertiesService.getScriptProperties().deleteProperty('f_' + target.phone);
+  PropertiesService.getScriptProperties().deleteProperty('f_+' + digitsOf(target.phone));
+
+  Logger.log('=======================================');
+  Logger.log('رقم الجوال المسجّل : ' + target.phone);
+  Logger.log('كلمة المرور الجديدة: ' + pass);
+  Logger.log('=======================================');
+  Logger.log('سجّل الدخول بهما ثم غيّر كلمة المرور من لوحة الإدارة.');
+}
+
+/* يعرض المستخدمين المسجّلين دون كلمات المرور — للتشخيص من المحرر */
+function listUsers() {
+  var us = rows('Users');
+  if (!us.length) { Logger.log('لا يوجد مستخدمون.'); return; }
+  for (var i = 0; i < us.length; i++) {
+    Logger.log((i + 1) + ') ' + us[i].name + ' | ' + us[i].phone +
+      ' | ' + us[i].role + ' | ' + (isTrue(us[i].active) ? 'نشط' : 'معطّل'));
+  }
 }
