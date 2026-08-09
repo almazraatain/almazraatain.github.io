@@ -43,7 +43,7 @@ pre{background:#12211c;color:#dfe9e4;padding:18px;border-radius:14px;overflow:au
 
 <div class="stepbox"><span class="n">4</span><b>انسخ والصق</b>
 <p>اضغط زر «نسخ الكود كاملًا» تحت، ثم ارجع للمحرر والصق بـ <code>⌘ + V</code>، ثم احفظ بـ <code>⌘ + S</code>.<br>
-تأكد أن آخر سطر في المحرر هو قوس <code>}</code> وحده، وأن عدد الأسطر 525.</p></div>
+تأكد أن آخر سطر في المحرر هو قوس <code>}</code> وحده، وأن عدد الأسطر 526.</p></div>
 
 <div class="stepbox"><span class="n">5</span><b>انشر الخادم</b>
 <p><code>Deploy</code> ← <code>New deployment</code> ← اضغط الترس ⚙️ واختر <code>Web app</code>.<br>
@@ -60,7 +60,7 @@ pre{background:#12211c;color:#dfe9e4;padding:18px;border-radius:14px;overflow:au
 
 <div class="copybar">
 <button class="copybtn" id="cp">نسخ الكود كاملًا</button>
-<span class="meta">525 سطرًا · 19.8 ك.ب</span>
+<span class="meta">526 سطرًا · 19.8 ك.ب</span>
 </div>
 <pre id="code">var K = 'mzr-key-2026-almazraatain';
 var SS = SpreadsheetApp.getActive();
@@ -441,8 +441,8 @@ function gModel(force) {
     if (saved) return saved;
   }
   var res = UrlFetchApp.fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(gKey()),
-    { muteHttpExceptions: true });
+    'https://generativelanguage.googleapis.com/v1beta/models',
+    { muteHttpExceptions: true, headers: { 'x-goog-api-key': gKey() } });
   if (res.getResponseCode() !== 200) return null;
   var list = (JSON.parse(res.getContentText()).models) || [];
   var usable = [];
@@ -477,9 +477,10 @@ function gJson(prompt, b64, retried) {
   if (b64) parts.push({ inline_data: { mime_type: 'image/jpeg', data: b64 } });
 
   var res = UrlFetchApp.fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(key),
+    'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent',
     {
       method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { 'x-goog-api-key': key },
       payload: JSON.stringify({
         contents: [{ role: 'user', parts: parts }],
         generationConfig: { temperature: 0.1, responseMimeType: 'application/json' }

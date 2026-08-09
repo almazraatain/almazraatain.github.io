@@ -377,8 +377,8 @@ function gModel(force) {
     if (saved) return saved;
   }
   var res = UrlFetchApp.fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(gKey()),
-    { muteHttpExceptions: true });
+    'https://generativelanguage.googleapis.com/v1beta/models',
+    { muteHttpExceptions: true, headers: { 'x-goog-api-key': gKey() } });
   if (res.getResponseCode() !== 200) return null;
   var list = (JSON.parse(res.getContentText()).models) || [];
   var usable = [];
@@ -413,9 +413,10 @@ function gJson(prompt, b64, retried) {
   if (b64) parts.push({ inline_data: { mime_type: 'image/jpeg', data: b64 } });
 
   var res = UrlFetchApp.fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(key),
+    'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent',
     {
       method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { 'x-goog-api-key': key },
       payload: JSON.stringify({
         contents: [{ role: 'user', parts: parts }],
         generationConfig: { temperature: 0.1, responseMimeType: 'application/json' }
