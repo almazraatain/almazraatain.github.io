@@ -369,73 +369,76 @@ function addUser(b, u) {
 
 function gKey() { return PropertiesService.getScriptProperties().getProperty('GEMINI_KEY'); }
 
-/* يكتشف نموذجًا صالحًا من مفتاح المستخدم ويحفظه، فلا يتعطل لو تغيرت الأسماء */
-function gModel(force) {
+/* يبني قائمة نماذج مرشّحة من مفتاح المستخدم.
+   الأفضلية لأسماء latest لأن النسخ المثبّتة (مثل ‎-001) بلا حصة مجانية. */
+function gModels(force) {
   var props = PropertiesService.getScriptProperties();
   if (!force) {
-    var saved = props.getProperty('GEMINI_MODEL');
-    if (saved) return saved;
+    var saved = props.getProperty('GEMINI_MODELS');
+    if (saved) { try { return JSON.parse(saved); } catch (x) {} }
   }
-  var res = UrlFetchApp.fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models',
+  var res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models',
     { muteHttpExceptions: true, headers: { 'x-goog-api-key': gKey() } });
-  if (res.getResponseCode() !== 200) return null;
+  if (res.getResponseCode() !== 200) return [];
   var list = (JSON.parse(res.getContentText()).models) || [];
-  var usable = [];
+  var ok = [];
   for (var i = 0; i < list.length; i++) {
-    var m = list[i], methods = m.supportedGenerationMethods || m.supportedActions || [];
-    if (methods.indexOf('generateContent') < 0) continue;
-    var name = String(m.name).replace('models/', '');
-    if (name.indexOf('embedding') >= 0 || name.indexOf('imagen') >= 0) continue;
-    usable.push(name);
+    var m = list[i], meth = m.supportedGenerationMethods || m.supportedActions || [];
+    if (meth.indexOf('generateContent') < 0) continue;
+    var n = String(m.name).replace('models/', '');
+    if (/embedding|imagen|tts|image|veo|learnlm|native-audio/i.test(n)) continue;
+    ok.push(n);
   }
-  /* الأفضلية للأخف والأسرع لأن الباقة المجانية أسخى معها */
-  var order = ['flash-lite', 'flash', 'pro'];
-  for (var o = 0; o < order.length; o++) {
-    for (var k = 0; k < usable.length; k++) {
-      if (usable[k].indexOf(order[o]) >= 0) {
-        props.setProperty('GEMINI_MODEL', usable[k]);
-        return usable[k];
-      }
-    }
+  function pick(re) { return ok.filter(function (n) { return re.test(n); }); }
+  var order = pick(/flash-lite-latest/)
+    .concat(pick(/flash-latest/))
+    .concat(pick(/^gemini-[0-9.]+-flash-lite$/))
+    .concat(pick(/^gemini-[0-9.]+-flash$/))
+    .concat(pick(/flash/))
+    .concat(ok);
+  var seen = {}, out = [];
+  for (var k = 0; k < order.length && out.length < 6; k++) {
+    if (!seen[order[k]]) { seen[order[k]] = 1; out.push(order[k]); }
   }
-  if (usable.length) { props.setProperty('GEMINI_MODEL', usable[0]); return usable[0]; }
-  return null;
+  props.setProperty('GEMINI_MODELS', JSON.stringify(out));
+  return out;
 }
 
-function gJson(prompt, b64, retried) {
+/* يجرّب المرشّحين بالترتيب: يتخطى المستنفد أو غير الموجود إلى التالي */
+function gJson(prompt, b64) {
   var key = gKey();
   if (!key) return { error: 'NO_AI_KEY' };
-  var model = gModel(false);
-  if (!model) return { error: 'NO_AI_MODEL' };
+  var models = gModels(false);
+  if (!models.length) models = gModels(true);
+  if (!models.length) return { error: 'NO_AI_MODEL' };
 
   var parts = [{ text: prompt }];
   if (b64) parts.push({ inline_data: { mime_type: 'image/jpeg', data: b64 } });
+  var payload = JSON.stringify({
+    contents: [{ role: 'user', parts: parts }],
+    generationConfig: { temperature: 0.1, responseMimeType: 'application/json' }
+  });
 
-  var res = UrlFetchApp.fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent',
-    {
-      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-      headers: { 'x-goog-api-key': key },
-      payload: JSON.stringify({
-        contents: [{ role: 'user', parts: parts }],
-        generationConfig: { temperature: 0.1, responseMimeType: 'application/json' }
-      })
-    });
-
-  var code = res.getResponseCode(), body = res.getContentText();
-  if (code === 404 && !retried) {
-    PropertiesService.getScriptProperties().deleteProperty('GEMINI_MODEL');
-    gModel(true);
-    return gJson(prompt, b64, true);
+  var lastCode = 0, lastBody = '';
+  for (var i = 0; i < models.length; i++) {
+    var res = UrlFetchApp.fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/' + models[i] + ':generateContent',
+      { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+        headers: { 'x-goog-api-key': key }, payload: payload });
+    lastCode = res.getResponseCode();
+    lastBody = res.getContentText();
+    if (lastCode === 200) {
+      try {
+        var txt = JSON.parse(lastBody).candidates[0].content.parts[0].text;
+        return { ok: 1, data: JSON.parse(txt), model: models[i] };
+      } catch (x) { return { error: 'AI_PARSE' }; }
+    }
+    /* 429 مستنفد · 404 غير موجود · 503 مشغول -> جرّب التالي */
+    if (lastCode !== 429 && lastCode !== 404 && lastCode !== 503) break;
+    PropertiesService.getScriptProperties().deleteProperty('GEMINI_MODELS');
   }
-  if (code === 429) return { error: 'AI_QUOTA' };
-  if (code !== 200) return { error: 'AI_FAIL', detail: body.substring(0, 300) };
-
-  try {
-    var txt = JSON.parse(body).candidates[0].content.parts[0].text;
-    return { ok: 1, data: JSON.parse(txt) };
-  } catch (x) { return { error: 'AI_PARSE' }; }
+  if (lastCode === 429) return { error: 'AI_QUOTA' };
+  return { error: 'AI_FAIL', detail: String(lastCode) + ' ' + lastBody.substring(0, 200) };
 }
 
 var P_INVOICE =
@@ -460,8 +463,10 @@ function aiRun(b, u) {
   if (b.mode === 'harvest') return gJson(P_HARVEST, b.img);
   if (b.mode === 'ping') {
     if (!gKey()) return { error: 'NO_AI_KEY' };
-    var m = gModel(false);
-    return m ? { ok: 1, model: m } : { error: 'NO_AI_MODEL' };
+    /* اختبار حقيقي: يرسل طلبًا فعليًا ليتأكد من الحصة لا من وجود النموذج فقط */
+    var t = gJson('أعد JSON فقط: {"ok":1}', '');
+    if (t.ok) return { ok: 1, model: t.model };
+    return t;
   }
   return { error: 'BAD_ACTION' };
 }
