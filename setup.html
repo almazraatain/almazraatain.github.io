@@ -43,7 +43,7 @@ pre{background:#12211c;color:#dfe9e4;padding:18px;border-radius:14px;overflow:au
 
 <div class="stepbox"><span class="n">4</span><b>انسخ والصق</b>
 <p>اضغط زر «نسخ الكود كاملًا» تحت، ثم ارجع للمحرر والصق بـ <code>⌘ + V</code>، ثم احفظ بـ <code>⌘ + S</code>.<br>
-تأكد أن آخر سطر في المحرر هو قوس <code>}</code> وحده، وأن عدد الأسطر 531.</p></div>
+تأكد أن آخر سطر في المحرر هو قوس <code>}</code> وحده، وأن عدد الأسطر 612.</p></div>
 
 <div class="stepbox"><span class="n">5</span><b>انشر الخادم</b>
 <p><code>Deploy</code> ← <code>New deployment</code> ← اضغط الترس ⚙️ واختر <code>Web app</code>.<br>
@@ -60,7 +60,7 @@ pre{background:#12211c;color:#dfe9e4;padding:18px;border-radius:14px;overflow:au
 
 <div class="copybar">
 <button class="copybtn" id="cp">نسخ الكود كاملًا</button>
-<span class="meta">531 سطرًا · 20.4 ك.ب</span>
+<span class="meta">612 سطرًا · 23.2 ك.ب</span>
 </div>
 <pre id="code">var K = 'mzr-key-2026-almazraatain';
 var SS = SpreadsheetApp.getActive();
@@ -69,10 +69,10 @@ var PHOTOS = 'almazraatain-photos';
 var COLS = {
   Users: ['id','phone','name','role','hash','active','created'],
   Sessions: ['token','userId','expires'],
-  Harvests: ['id','date','capturedAt','farm','baskets','batch','photo','lat','lng','device','gate','aiBaskets','aiQuality','aiNotes','userId','userName','void','voidReason'],
-  Sales: ['id','date','capturedAt','farm','baskets','gross','commission','transport','net','ptype','customer','due','lat','lng','device','userId','userName','void','voidReason'],
-  Expenses: ['id','date','capturedAt','category','amount','farm','payer','notes','photo','lat','lng','device','userId','userName','void','voidReason'],
-  Payments: ['id','date','saleId','amount','method','userId','userName','void','voidReason'],
+  Harvests: ['id','date','capturedAt','farm','baskets','batch','photo','lat','lng','device','gate','aiBaskets','aiQuality','aiNotes','userId','userName','void','voidReason','opId'],
+  Sales: ['id','date','capturedAt','farm','baskets','gross','commission','transport','net','ptype','customer','due','lat','lng','device','userId','userName','void','voidReason','opId'],
+  Expenses: ['id','date','capturedAt','category','amount','farm','payer','notes','photo','lat','lng','device','userId','userName','void','voidReason','opId'],
+  Payments: ['id','date','saleId','amount','method','userId','userName','void','voidReason','opId'],
   Log: ['date','userName','action','detail']
 };
 
@@ -130,23 +130,40 @@ function initSheet(s, n) {
   s.setFrozenRows(1);
 }
 
-/* يضيف أي أعمدة جديدة لجدول قائم دون المساس بالبيانات الموجودة */
+/* إضافة الأعمدة الجديدة في النهاية فقط.
+   إدراج عمود في المنتصف يزيح بيانات السجلات القديمة ويخلط الحقول،
+   لذلك نرفض أي تغيير في ترتيب الأعمدة القائمة ولا نلمس البيانات. */
 function migrate(s, n) {
-  var want = COLS[n], have = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
-  if (have.length &gt;= want.length) {
-    var same = true;
-    for (var j = 0; j &lt; want.length; j++) if (String(have[j]) !== want[j]) { same = false; break; }
-    if (same) return;
-  }
-  for (var i = 0; i &lt; want.length; i++) {
-    if (String(have[i] || '') !== want[i]) {
-      fmtCol(s, n, i);
-      s.getRange(1, i + 1).setValue(want[i]);
+  var want = COLS[n];
+  var lastCol = s.getLastColumn();
+  if (lastCol &gt;= want.length) return;
+
+  var have = s.getRange(1, 1, 1, lastCol).getValues()[0];
+  for (var i = 0; i &lt; have.length; i++) {
+    if (String(have[i]) !== want[i]) {
+      throw new Error('ترتيب أعمدة ' + n + ' لا يطابق الكود عند العمود ' + (i + 1) +
+        ' (' + have[i] + ' مقابل ' + want[i] + ') — أوقفت التعديل حماية للبيانات.');
     }
+  }
+  for (var c = lastCol; c &lt; want.length; c++) {
+    fmtCol(s, n, c);
+    s.getRange(1, c + 1).setValue(want[c]);
   }
 }
 
+/* قراءة الجدول مكلفة، وكانت تتكرر حتى ست مرات في حفظ واحد.
+   نخزّنها لحظيًا داخل الطلب الواحد فقط. */
+var RCACHE = {};
+function dirty(n) { delete RCACHE[n]; }
+
 function rows(n) {
+  if (RCACHE[n]) return RCACHE[n];
+  var out = readRows(n);
+  RCACHE[n] = out;
+  return out;
+}
+
+function readRows(n) {
   var s = sh(n), last = s.getLastRow();
   if (last &lt; 2) return [];
   var head = COLS[n];
@@ -164,6 +181,7 @@ function append(n, o) {
   var head = COLS[n], line = [];
   for (var c = 0; c &lt; head.length; c++) line.push(o[head[c]] === undefined ? '' : o[head[c]]);
   sh(n).appendRow(line);
+  dirty(n);
 }
 
 function uid() { return Utilities.getUuid().replace(/-/g, '').substring(0, 12); }
@@ -181,8 +199,39 @@ function mkToken(userId) {
   return token;
 }
 
+/* الجلسات كانت تتراكم بلا حذف وتُقرأ في كل طلب.
+   ننظّف المنتهية مرة كل يوم فيبقى الجدول صغيرًا. */
+function sweepSessions() {
+  var props = PropertiesService.getScriptProperties();
+  var last = Number(props.getProperty('SWEEP_AT') || 0);
+  if (Date.now() - last &lt; 864e5) return;
+  props.setProperty('SWEEP_AT', String(Date.now()));
+  var sheet = sh('Sessions'), ss = readRows('Sessions'), t = now(), n = 0;
+  for (var i = ss.length - 1; i &gt;= 0; i--) {
+    if (String(ss[i].expires) &lt;= t) { sheet.deleteRow(ss[i]._row); n++; }
+  }
+  if (n) dirty('Sessions');
+  normalisePhones();
+}
+
+/* يوحّد أرقام الجوال المخزّنة سابقًا على صيغة 05 — لا يغيّر الرقم نفسه
+   بل شكله فقط، والمطابقة تعمل قبل التوحيد وبعده. */
+function normalisePhones() {
+  var us = readRows('Users'), sheet = sh('Users');
+  var col = COLS.Users.indexOf('phone') + 1, n = 0;
+  for (var i = 0; i &lt; us.length; i++) {
+    var want = local05(us[i].phone);
+    if (want &amp;&amp; /^05[0-9]{8}$/.test(want) &amp;&amp; String(us[i].phone) !== want) {
+      sheet.getRange(us[i]._row, col).setValue(want);
+      n++;
+    }
+  }
+  if (n) dirty('Users');
+}
+
 function auth(token) {
   if (!token) return null;
+  sweepSessions();
   var ss = rows('Sessions');
   for (var i = 0; i &lt; ss.length; i++) {
     if (ss[i].token === token &amp;&amp; String(ss[i].expires) &gt; now()) {
@@ -198,6 +247,7 @@ function auth(token) {
 function logout(b) {
   var s = sh('Sessions'), ss = rows('Sessions');
   for (var i = ss.length - 1; i &gt;= 0; i--) if (ss[i].token === b.t) s.deleteRow(ss[i]._row);
+  dirty('Sessions');
   return { ok: 1 };
 }
 
@@ -210,7 +260,7 @@ function setup(b) {
   if (!b.pass || b.pass.length &lt; 8) return { error: 'SHORT_PASS' };
   var id = uid(), salt = uid();
   var nm = b.name || 'Admin';
-  append('Users', { id: id, phone: b.phone, name: nm, role: 'admin',
+  append('Users', { id: id, phone: local05(b.phone), name: nm, role: 'admin',
     hash: salt + '$' + hash(b.pass, salt), active: true, created: now() });
   var user = { id: id, name: nm, role: 'admin' };
   log(user, 'setup', b.phone);
@@ -221,22 +271,36 @@ function setup(b) {
 var MAX_TRIES = 5;
 var LOCK_MIN = 15;
 
+/* مفتاح القفل يُبنى على الرقم بعد توحيده لا على نصّه كما أُرسل.
+   بدون ذلك يصير لكل صيغة عدّاد مستقل (05… و966… و+966…)
+   فيتجاوز المخمِّن الحدَّ بمجرد تبديل الصيغة كل خمس محاولات. */
+function lockKey(phone) { return 'f_' + canonPhone(phone); }
+
+/* الصيغة المعتمدة للتخزين والعرض: 05xxxxxxxx بلا مفتاح دولة */
+function local05(v) {
+  var d = canonPhone(v);
+  return /^5[0-9]{8}$/.test(d) ? '0' + d : String(v === undefined || v === null ? '' : v);
+}
+
 function tries(phone) {
-  var p = PropertiesService.getScriptProperties().getProperty('f_' + phone);
+  var p = PropertiesService.getScriptProperties().getProperty(lockKey(phone));
   return p ? JSON.parse(p) : { n: 0, at: 0 };
 }
 
 function bump(phone, ok) {
   var props = PropertiesService.getScriptProperties();
-  if (ok) { props.deleteProperty('f_' + phone); return; }
+  if (ok) { props.deleteProperty(lockKey(phone)); return; }
   var rec = tries(phone);
   rec.n++; rec.at = Date.now();
-  props.setProperty('f_' + phone, JSON.stringify(rec));
+  props.setProperty(lockKey(phone), JSON.stringify(rec));
 }
 
 /* مقارنة الجوال بالأرقام فقط — تنجح حتى لو أزالت Sheets علامة + */
 function digitsOf(v) {
   var s = String(v === undefined || v === null ? '' : v);
+  /* الأرقام العربية-الهندية والفارسية تُحوَّل قبل أي معالجة */
+  s = s.replace(/[\u0660-\u0669]/g, function (c) { return c.charCodeAt(0) - 0x0660; })
+       .replace(/[\u06F0-\u06F9]/g, function (c) { return c.charCodeAt(0) - 0x06F0; });
   /* Sheets قد تعرض الأرقام الطويلة بصيغة علمية مثل 9.665E+11 */
   if (/^\d+(\.\d+)?[eE][+-]?\d+$/.test(s)) {
     var n = Number(s);
@@ -244,14 +308,19 @@ function digitsOf(v) {
   }
   return s.replace(/[^0-9]/g, '');
 }
+/* صيغة قياسية واحدة للرقم مهما كُتب:
+   05x · 5x · 9665x · +9665x · 009665x  -&gt;  5x
+   تستخدمها المطابقة ومفتاح القفل معًا حتى لا يختلفا. */
+function canonPhone(v) {
+  var d = digitsOf(v);
+  d = d.replace(/^0+/, '');
+  if (d.indexOf('966') === 0) d = d.substring(3);
+  return d.replace(/^0+/, '');
+}
+
 function samePhone(a, b) {
-  var x = digitsOf(a), y = digitsOf(b);
-  if (!x || !y) return false;
-  if (x === y) return true;
-  /* 0501234567 مقابل 966501234567 */
-  var nx = x.indexOf('966') === 0 ? x.substring(3) : x.replace(/^0/, '');
-  var ny = y.indexOf('966') === 0 ? y.substring(3) : y.replace(/^0/, '');
-  return nx === ny &amp;&amp; nx.length &gt;= 9;
+  var x = canonPhone(a), y = canonPhone(b);
+  return !!x &amp;&amp; x === y &amp;&amp; x.length &gt;= 9;
 }
 
 /* الحقول المنطقية قد تعود نصًا من Sheets */
@@ -344,15 +413,28 @@ function batchNo(farm, code) {
   return code + '-' + day.replace(/-/g, '') + '-' + ('00' + n).slice(-3);
 }
 
+/* لو انقطع الاتصال بعد أن يحفظ الخادم، يعيد العميل الإرسال.
+   نتعرّف على البصمة فنعيد النتيجة السابقة بدل تسجيلها مرتين. */
+function seen(table, opid) {
+  if (!opid) return null;
+  var list = rows(table);
+  for (var i = 0; i &lt; list.length; i++) if (String(list[i].opId) === String(opid)) return list[i];
+  return null;
+}
+
 function add(b, u) {
   var t = b.t2, r = b.rec, id = uid(), lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
+    var dup = seen(t, r &amp;&amp; r.opId);
+    if (dup) {
+      return { ok: 1, id: dup.id, batch: dup.batch, net: dup.net, duplicate: 1 };
+    }
     if (t === 'Harvests') {
       if (!(Number(r.baskets) &gt; 0)) return { error: 'BAD_BASKETS' };
       if (!b.img) return { error: 'NEED_PHOTO' };
       var batch = batchNo(r.farm, r.code);
-      append('Harvests', { id: id, date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
+      append('Harvests', { id: id, opId: (r.opId || ''), date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
         baskets: Number(r.baskets), batch: batch, photo: upload(b.img, id),
         lat: r.lat || '', lng: r.lng || '', device: r.device || '', gate: r.gate || '',
         aiBaskets: r.aiBaskets === undefined || r.aiBaskets === '' ? '' : Number(r.aiBaskets),
@@ -369,7 +451,7 @@ function add(b, u) {
       var net = Number(r.gross) - Number(r.commission || 0) - Number(r.transport || 0);
       if (net &lt; 0) return { error: 'NEG_NET' };
       if (r.ptype === 'credit' &amp;&amp; (!r.customer || !r.due)) return { error: 'NEED_CUSTOMER' };
-      append('Sales', { id: id, date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
+      append('Sales', { id: id, opId: (r.opId || ''), date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
         baskets: n, gross: Number(r.gross),
         commission: Number(r.commission || 0), transport: Number(r.transport || 0), net: net,
         ptype: r.ptype, customer: r.customer || '', due: r.due || '',
@@ -381,7 +463,7 @@ function add(b, u) {
     if (t === 'Expenses') {
       if (!(Number(r.amount) &gt; 0)) return { error: 'BAD_AMOUNT' };
       if (!b.img) return { error: 'NEED_PHOTO' };
-      append('Expenses', { id: id, date: now(), capturedAt: r.capturedAt || '', category: r.category,
+      append('Expenses', { id: id, opId: (r.opId || ''), date: now(), capturedAt: r.capturedAt || '', category: r.category,
         amount: Number(r.amount), farm: r.farm, payer: r.payer, notes: r.notes || '',
         photo: upload(b.img, id), lat: r.lat || '', lng: r.lng || '', device: r.device || '',
         userId: u.id, userName: u.name, 'void': false, voidReason: '' });
@@ -390,7 +472,7 @@ function add(b, u) {
     }
     if (t === 'Payments') {
       if (!(Number(r.amount) &gt; 0)) return { error: 'BAD_AMOUNT' };
-      append('Payments', { id: id, date: now(), saleId: r.saleId, amount: Number(r.amount),
+      append('Payments', { id: id, opId: (r.opId || ''), date: now(), saleId: r.saleId, amount: Number(r.amount),
         method: r.method || 'cash', userId: u.id, userName: u.name, 'void': false, voidReason: '' });
       log(u, 'payment', r.saleId + ' / ' + r.amount);
       return { ok: 1, id: id };
@@ -421,7 +503,7 @@ function addUser(b, u) {
   var us = rows('Users');
   for (var i = 0; i &lt; us.length; i++) if (samePhone(us[i].phone, b.phone)) return { error: 'DUP_PHONE' };
   var salt = uid();
-  append('Users', { id: uid(), phone: b.phone, name: b.name, role: b.role || 'operator',
+  append('Users', { id: uid(), phone: local05(b.phone), name: b.name, role: b.role || 'operator',
     hash: salt + '$' + hash(b.pass, salt), active: true, created: now() });
   log(u, 'adduser', b.phone + ' / ' + b.role);
   return { ok: 1 };
@@ -574,8 +656,7 @@ function resetAdminPassword() {
   var salt = uid();
   s.getRange(target._row, COLS.Users.indexOf('hash') + 1).setValue(salt + '$' + hash(pass, salt));
   s.getRange(target._row, COLS.Users.indexOf('active') + 1).setValue(true);
-  PropertiesService.getScriptProperties().deleteProperty('f_' + target.phone);
-  PropertiesService.getScriptProperties().deleteProperty('f_+' + digitsOf(target.phone));
+  bump(target.phone, true);
 
   Logger.log('=======================================');
   Logger.log('رقم الجوال المسجّل : ' + target.phone);
