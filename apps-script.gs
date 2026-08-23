@@ -5,10 +5,10 @@ var PHOTOS = 'almazraatain-photos';
 var COLS = {
   Users: ['id','phone','name','role','hash','active','created'],
   Sessions: ['token','userId','expires'],
-  Harvests: ['id','date','capturedAt','farm','baskets','batch','photo','lat','lng','device','gate','aiBaskets','aiQuality','aiNotes','userId','userName','void','voidReason'],
-  Sales: ['id','date','capturedAt','farm','baskets','gross','commission','transport','net','ptype','customer','due','lat','lng','device','userId','userName','void','voidReason'],
-  Expenses: ['id','date','capturedAt','category','amount','farm','payer','notes','photo','lat','lng','device','userId','userName','void','voidReason'],
-  Payments: ['id','date','saleId','amount','method','userId','userName','void','voidReason'],
+  Harvests: ['id','date','capturedAt','farm','baskets','batch','photo','lat','lng','device','gate','aiBaskets','aiQuality','aiNotes','userId','userName','void','voidReason','opId'],
+  Sales: ['id','date','capturedAt','farm','baskets','gross','commission','transport','net','ptype','customer','due','lat','lng','device','userId','userName','void','voidReason','opId'],
+  Expenses: ['id','date','capturedAt','category','amount','farm','payer','notes','photo','lat','lng','device','userId','userName','void','voidReason','opId'],
+  Payments: ['id','date','saleId','amount','method','userId','userName','void','voidReason','opId'],
   Log: ['date','userName','action','detail']
 };
 
@@ -66,23 +66,40 @@ function initSheet(s, n) {
   s.setFrozenRows(1);
 }
 
-/* يضيف أي أعمدة جديدة لجدول قائم دون المساس بالبيانات الموجودة */
+/* إضافة الأعمدة الجديدة في النهاية فقط.
+   إدراج عمود في المنتصف يزيح بيانات السجلات القديمة ويخلط الحقول،
+   لذلك نرفض أي تغيير في ترتيب الأعمدة القائمة ولا نلمس البيانات. */
 function migrate(s, n) {
-  var want = COLS[n], have = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
-  if (have.length >= want.length) {
-    var same = true;
-    for (var j = 0; j < want.length; j++) if (String(have[j]) !== want[j]) { same = false; break; }
-    if (same) return;
-  }
-  for (var i = 0; i < want.length; i++) {
-    if (String(have[i] || '') !== want[i]) {
-      fmtCol(s, n, i);
-      s.getRange(1, i + 1).setValue(want[i]);
+  var want = COLS[n];
+  var lastCol = s.getLastColumn();
+  if (lastCol >= want.length) return;
+
+  var have = s.getRange(1, 1, 1, lastCol).getValues()[0];
+  for (var i = 0; i < have.length; i++) {
+    if (String(have[i]) !== want[i]) {
+      throw new Error('ترتيب أعمدة ' + n + ' لا يطابق الكود عند العمود ' + (i + 1) +
+        ' (' + have[i] + ' مقابل ' + want[i] + ') — أوقفت التعديل حماية للبيانات.');
     }
+  }
+  for (var c = lastCol; c < want.length; c++) {
+    fmtCol(s, n, c);
+    s.getRange(1, c + 1).setValue(want[c]);
   }
 }
 
+/* قراءة الجدول مكلفة، وكانت تتكرر حتى ست مرات في حفظ واحد.
+   نخزّنها لحظيًا داخل الطلب الواحد فقط. */
+var RCACHE = {};
+function dirty(n) { delete RCACHE[n]; }
+
 function rows(n) {
+  if (RCACHE[n]) return RCACHE[n];
+  var out = readRows(n);
+  RCACHE[n] = out;
+  return out;
+}
+
+function readRows(n) {
   var s = sh(n), last = s.getLastRow();
   if (last < 2) return [];
   var head = COLS[n];
@@ -100,6 +117,7 @@ function append(n, o) {
   var head = COLS[n], line = [];
   for (var c = 0; c < head.length; c++) line.push(o[head[c]] === undefined ? '' : o[head[c]]);
   sh(n).appendRow(line);
+  dirty(n);
 }
 
 function uid() { return Utilities.getUuid().replace(/-/g, '').substring(0, 12); }
@@ -117,8 +135,23 @@ function mkToken(userId) {
   return token;
 }
 
+/* الجلسات كانت تتراكم بلا حذف وتُقرأ في كل طلب.
+   ننظّف المنتهية مرة كل يوم فيبقى الجدول صغيرًا. */
+function sweepSessions() {
+  var props = PropertiesService.getScriptProperties();
+  var last = Number(props.getProperty('SWEEP_AT') || 0);
+  if (Date.now() - last < 864e5) return;
+  props.setProperty('SWEEP_AT', String(Date.now()));
+  var sheet = sh('Sessions'), ss = readRows('Sessions'), t = now(), n = 0;
+  for (var i = ss.length - 1; i >= 0; i--) {
+    if (String(ss[i].expires) <= t) { sheet.deleteRow(ss[i]._row); n++; }
+  }
+  if (n) dirty('Sessions');
+}
+
 function auth(token) {
   if (!token) return null;
+  sweepSessions();
   var ss = rows('Sessions');
   for (var i = 0; i < ss.length; i++) {
     if (ss[i].token === token && String(ss[i].expires) > now()) {
@@ -134,6 +167,7 @@ function auth(token) {
 function logout(b) {
   var s = sh('Sessions'), ss = rows('Sessions');
   for (var i = ss.length - 1; i >= 0; i--) if (ss[i].token === b.t) s.deleteRow(ss[i]._row);
+  dirty('Sessions');
   return { ok: 1 };
 }
 
@@ -280,15 +314,28 @@ function batchNo(farm, code) {
   return code + '-' + day.replace(/-/g, '') + '-' + ('00' + n).slice(-3);
 }
 
+/* لو انقطع الاتصال بعد أن يحفظ الخادم، يعيد العميل الإرسال.
+   نتعرّف على البصمة فنعيد النتيجة السابقة بدل تسجيلها مرتين. */
+function seen(table, opid) {
+  if (!opid) return null;
+  var list = rows(table);
+  for (var i = 0; i < list.length; i++) if (String(list[i].opId) === String(opid)) return list[i];
+  return null;
+}
+
 function add(b, u) {
   var t = b.t2, r = b.rec, id = uid(), lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
+    var dup = seen(t, r && r.opId);
+    if (dup) {
+      return { ok: 1, id: dup.id, batch: dup.batch, net: dup.net, duplicate: 1 };
+    }
     if (t === 'Harvests') {
       if (!(Number(r.baskets) > 0)) return { error: 'BAD_BASKETS' };
       if (!b.img) return { error: 'NEED_PHOTO' };
       var batch = batchNo(r.farm, r.code);
-      append('Harvests', { id: id, date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
+      append('Harvests', { id: id, opId: (r.opId || ''), date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
         baskets: Number(r.baskets), batch: batch, photo: upload(b.img, id),
         lat: r.lat || '', lng: r.lng || '', device: r.device || '', gate: r.gate || '',
         aiBaskets: r.aiBaskets === undefined || r.aiBaskets === '' ? '' : Number(r.aiBaskets),
@@ -305,7 +352,7 @@ function add(b, u) {
       var net = Number(r.gross) - Number(r.commission || 0) - Number(r.transport || 0);
       if (net < 0) return { error: 'NEG_NET' };
       if (r.ptype === 'credit' && (!r.customer || !r.due)) return { error: 'NEED_CUSTOMER' };
-      append('Sales', { id: id, date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
+      append('Sales', { id: id, opId: (r.opId || ''), date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
         baskets: n, gross: Number(r.gross),
         commission: Number(r.commission || 0), transport: Number(r.transport || 0), net: net,
         ptype: r.ptype, customer: r.customer || '', due: r.due || '',
@@ -317,7 +364,7 @@ function add(b, u) {
     if (t === 'Expenses') {
       if (!(Number(r.amount) > 0)) return { error: 'BAD_AMOUNT' };
       if (!b.img) return { error: 'NEED_PHOTO' };
-      append('Expenses', { id: id, date: now(), capturedAt: r.capturedAt || '', category: r.category,
+      append('Expenses', { id: id, opId: (r.opId || ''), date: now(), capturedAt: r.capturedAt || '', category: r.category,
         amount: Number(r.amount), farm: r.farm, payer: r.payer, notes: r.notes || '',
         photo: upload(b.img, id), lat: r.lat || '', lng: r.lng || '', device: r.device || '',
         userId: u.id, userName: u.name, 'void': false, voidReason: '' });
@@ -326,7 +373,7 @@ function add(b, u) {
     }
     if (t === 'Payments') {
       if (!(Number(r.amount) > 0)) return { error: 'BAD_AMOUNT' };
-      append('Payments', { id: id, date: now(), saleId: r.saleId, amount: Number(r.amount),
+      append('Payments', { id: id, opId: (r.opId || ''), date: now(), saleId: r.saleId, amount: Number(r.amount),
         method: r.method || 'cash', userId: u.id, userName: u.name, 'void': false, voidReason: '' });
       log(u, 'payment', r.saleId + ' / ' + r.amount);
       return { ok: 1, id: id };

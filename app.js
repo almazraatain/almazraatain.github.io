@@ -130,36 +130,80 @@ function netErr() {
   return e;
 }
 
-function call(action, extra) {
+/* مهلة قصوى لكل طلب — بدونها يبقى الطلب معلّقًا للأبد
+   فتعلق معه أعلام الانشغال ويتوقف الحفظ نهائيًا. */
+var CALL_TIMEOUT = 45000;
+
+function call(action, extra, timeoutMs) {
   var body = { k: KEY, a: action, t: S.token };
   for (var p in extra) body[p] = extra[p];
+
+  var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  var timedOut = false;
+  var timer = setTimeout(function () {
+    timedOut = true;
+    if (ctl) ctl.abort();
+  }, timeoutMs || CALL_TIMEOUT);
+
+  function done(v) { clearTimeout(timer); return v; }
+  function fail(e) { clearTimeout(timer); throw e; }
+
   return fetch(API, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify(body),
-    redirect: 'follow'
-  }).then(function (r) { return r.json(); }).then(function (d) {
+    redirect: 'follow',
+    signal: ctl ? ctl.signal : undefined
+  }).then(
+    function (r) { return r.text(); },
+    function () {
+      /* فشل شبكة أو انتهت المهلة — يُحفظ محليًا ويُعاد لاحقًا */
+      var e = netErr();
+      if (timedOut) e.message = 'الخادم لم يستجب خلال المهلة';
+      throw e;
+    }
+  ).then(function (txt) {
+    var d;
+    /* رد غير JSON يعني خطأ في الخادم لا انقطاعًا في الشبكة —
+       التمييز مهم وإلا حُفظت العملية محليًا وأُعيد إرسالها بلا فائدة. */
+    try { d = JSON.parse(txt); }
+    catch (x) { throw new Error('رد الخادم غير مفهوم — تحقق من رابط الخادم أو أعد نشره'); }
     if (d && d.error) {
       if (d.error === 'NO_SESSION') { S.token = ''; localStorage.removeItem('mzr_token'); }
       throw new Error(ERR[d.error] || d.error);
     }
     return d;
-  }, function () { throw netErr(); });
+  }).then(done, fail);
 }
 
 /* ═══════════ التخزين المحلي (IndexedDB) ═══════════ */
 var DB = null;
+var DB_DEAD = false;
+
 function idb() {
   if (DB) return Promise.resolve(DB);
+  if (DB_DEAD) return Promise.reject(new Error('no-idb'));
   return new Promise(function (res, rej) {
-    var rq = indexedDB.open('mzr', 1);
+    var settled = false;
+    function ok(v) { if (!settled) { settled = true; res(v); } }
+    function no(e) { if (!settled) { settled = true; DB_DEAD = true; rej(e); } }
+
+    /* في وضع التصفح الخاص أو عند تعارض التبويبات قد لا يرد المتصفح إطلاقًا،
+       فنتوقف بعد خمس ثوانٍ بدل تعليق التطبيق على شاشة التحميل. */
+    var guardTimer = setTimeout(function () { no(new Error('idb-timeout')); }, 5000);
+
+    var rq;
+    try { rq = indexedDB.open('mzr', 1); }
+    catch (x) { clearTimeout(guardTimer); no(x); return; }
+
     rq.onupgradeneeded = function () {
       var d = rq.result;
       if (!d.objectStoreNames.contains('queue')) d.createObjectStore('queue', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('cache')) d.createObjectStore('cache', { keyPath: 'key' });
     };
-    rq.onsuccess = function () { DB = rq.result; res(DB); };
-    rq.onerror = function () { rej(rq.error); };
+    rq.onsuccess = function () { clearTimeout(guardTimer); DB = rq.result; ok(DB); };
+    rq.onerror = function () { clearTimeout(guardTimer); no(rq.error); };
+    rq.onblocked = function () { clearTimeout(guardTimer); no(new Error('idb-blocked')); };
   });
 }
 function idbDo(store, mode, fn) {
@@ -186,8 +230,16 @@ function queueOp(t2, rec, img) {
   });
 }
 
+/* بصمة فريدة لكل عملية: لو انقطع الاتصال بعد أن يحفظ الخادم
+   وأُعيد الإرسال، يتعرّف الخادم عليها ولا يسجّلها مرتين. */
+function stamp(rec) {
+  if (rec && !rec.opId) rec.opId = opId();
+  return rec;
+}
+
 /* يرسل العملية فورًا، وإن تعذّر الاتصال يحفظها للرفع لاحقًا */
 function submitOp(t2, rec, img) {
+  stamp(rec);
   if (!navigator.onLine) return queueOp(t2, rec, img);
   return call('add', { t2: t2, rec: rec, img: img }).catch(function (e) {
     if (e.offline) return queueOp(t2, rec, img);
@@ -234,6 +286,9 @@ function syncQueue(loud) {
       });
   }
 
+  /* العلم يُفكّ في كل المسارات — لو بقي مرفوعًا توقف الرفع للأبد */
+  function release(v) { S.syncing = false; return v; }
+
   return step(0).then(function () {
     S.syncing = false;
     if (done) {
@@ -245,7 +300,7 @@ function syncQueue(loud) {
     }
     if (failedCount()) render();
     return done;
-  }).catch(function () { S.syncing = false; return 0; });
+  }).then(release, function () { release(); return 0; });
 }
 
 function retryFailed() {
@@ -517,20 +572,38 @@ function openScanner(onCode) {
       document.getElementById('scanBox').className = 'scan-frame';
       msg.textContent = 'وجّه الكاميرا نحو الرمز';
       var c = document.createElement('canvas'), ctx = c.getContext('2d', { willReadFrequently: true });
-      (function tick() {
+      /* تحليل إطار بدقة كاملة (١٩٢٠×١٠٨٠ ≈ مليونا بكسل) في كل رسمة
+         يخنق معالج الجوال ويجمّد الواجهة. نصغّر الإطار ونحلّل
+         ست مرات في الثانية فقط — أسرع من قدرة اليد على التثبيت. */
+      var MAXW = 640, MIN_GAP = 160, lastRun = 0;
+
+      (function tick(now) {
         if (!SCAN.stream) return;
-        if (vid.readyState === vid.HAVE_ENOUGH_DATA && typeof jsQR === 'function') {
-          c.width = vid.videoWidth; c.height = vid.videoHeight;
-          ctx.drawImage(vid, 0, 0, c.width, c.height);
-          var img = ctx.getImageData(0, 0, c.width, c.height);
-          var hit = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
-          if (hit && hit.data) {
-            stopScan(); closeModal();
-            onCode(String(hit.data).trim());
-            return;
-          }
-        }
         SCAN.raf = requestAnimationFrame(tick);
+        if (!now) now = Date.now();
+        if (now - lastRun < MIN_GAP) return;
+        lastRun = now;
+
+        if (vid.readyState !== vid.HAVE_ENOUGH_DATA || typeof jsQR !== 'function') return;
+        var vw = vid.videoWidth, vh = vid.videoHeight;
+        if (!vw || !vh) return;
+
+        var scale = Math.min(1, MAXW / vw);
+        var w = Math.max(1, Math.round(vw * scale));
+        var h = Math.max(1, Math.round(vh * scale));
+        if (c.width !== w) { c.width = w; c.height = h; }
+
+        ctx.drawImage(vid, 0, 0, w, h);
+        var hit;
+        try {
+          var img = ctx.getImageData(0, 0, w, h);
+          hit = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+        } catch (x) { return; }
+
+        if (hit && hit.data) {
+          stopScan(); closeModal();
+          onCode(String(hit.data).trim());
+        }
       })();
     })
     .catch(function () {
@@ -1671,7 +1744,8 @@ function boot() {
   watchNet();
   if (!apiReady()) { S.user = null; render(); return; }
 
-  loadQueue().then(function () {
+  /* أي فشل في التخزين المحلي يجب ألا يمنع فتح التطبيق */
+  loadQueue().catch(function () { S.queue = []; }).then(function () {
     if (S.token) {
       return refresh()
         .then(function () { S.view = 'home'; render(); syncQueue(false); })
