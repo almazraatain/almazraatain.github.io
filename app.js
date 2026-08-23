@@ -115,12 +115,25 @@ function toast(msg, kind) {
   toast._t = setTimeout(function () { toastBox.className = 'toast ' + (kind || ''); }, 3600);
 }
 
+/* صيغة موحّدة واحدة: 05xxxxxxxx بلا مفتاح دولة.
+   يقبل ما يكتبه المستخدم بأي شكل (05… · 5… · 966… · +966… · 00966…)
+   ويعيده دائمًا بالصيغة المحلية. */
+function phoneCore(raw) {
+  var d = digits(raw).replace(/\D/g, '').replace(/^0+/, '');
+  if (d.indexOf('966') === 0) d = d.substring(3);
+  return d.replace(/^0+/, '');
+}
+
 function phoneNorm(raw) {
-  var d = digits(raw).replace(/\D/g, '');
-  if (d.indexOf('966') === 0) return '+' + d;
-  if (d.indexOf('05') === 0 && d.length === 10) return '+966' + d.slice(1);
-  if (d.indexOf('5') === 0 && d.length === 9) return '+966' + d;
-  throw new Error('رقم الجوال غير صالح (مثال: 0501234567)');
+  var d = phoneCore(raw);
+  if (!/^5\d{8}$/.test(d)) throw new Error('رقم الجوال غير صالح (مثال: 0501234567)');
+  return '0' + d;
+}
+
+/* للعرض فقط — يوحّد شكل الأرقام المخزّنة سابقًا بصيغ أخرى */
+function phoneShow(v) {
+  var d = phoneCore(v);
+  return /^5\d{8}$/.test(d) ? '0' + d : String(v == null ? '' : v);
 }
 
 /* ═══════════ الاتصال بالخادم ═══════════ */
@@ -1338,7 +1351,7 @@ function tabUsers() {
       var active = u.active === true || u.active === 'TRUE';
       var role = u.role === 'admin' ? 'مدير' : u.role === 'operator' ? 'مشغّل' : 'مطّلع';
       return '<div class="userrow"><div><b>' + esc(u.name) + ' <span class="tag' + (active ? '' : ' grey') + '">' + role + '</span></b>' +
-        '<small>' + esc(u.phone) + ' · ' + (active ? 'نشط' : 'معطّل') + '</small></div>' +
+        '<small>' + esc(phoneShow(u.phone)) + ' · ' + (active ? 'نشط' : 'معطّل') + '</small></div>' +
         '<button class="mini" data-act="chpass" data-id="' + esc(u.id) + '" data-name="' + esc(u.name) + '">كلمة المرور</button>' +
         (u.id === S.user.id ? '<span class="tag">أنت</span>'
           : '<button class="mini ' + (active ? 'danger' : '') + '" data-act="toggleUser" data-id="' + esc(u.id) + '" data-on="' + (active ? '0' : '1') + '">' + (active ? 'تعطيل' : 'تفعيل') + '</button>') +

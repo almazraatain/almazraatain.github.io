@@ -147,6 +147,22 @@ function sweepSessions() {
     if (String(ss[i].expires) <= t) { sheet.deleteRow(ss[i]._row); n++; }
   }
   if (n) dirty('Sessions');
+  normalisePhones();
+}
+
+/* يوحّد أرقام الجوال المخزّنة سابقًا على صيغة 05 — لا يغيّر الرقم نفسه
+   بل شكله فقط، والمطابقة تعمل قبل التوحيد وبعده. */
+function normalisePhones() {
+  var us = readRows('Users'), sheet = sh('Users');
+  var col = COLS.Users.indexOf('phone') + 1, n = 0;
+  for (var i = 0; i < us.length; i++) {
+    var want = local05(us[i].phone);
+    if (want && /^05[0-9]{8}$/.test(want) && String(us[i].phone) !== want) {
+      sheet.getRange(us[i]._row, col).setValue(want);
+      n++;
+    }
+  }
+  if (n) dirty('Users');
 }
 
 function auth(token) {
@@ -180,7 +196,7 @@ function setup(b) {
   if (!b.pass || b.pass.length < 8) return { error: 'SHORT_PASS' };
   var id = uid(), salt = uid();
   var nm = b.name || 'Admin';
-  append('Users', { id: id, phone: b.phone, name: nm, role: 'admin',
+  append('Users', { id: id, phone: local05(b.phone), name: nm, role: 'admin',
     hash: salt + '$' + hash(b.pass, salt), active: true, created: now() });
   var user = { id: id, name: nm, role: 'admin' };
   log(user, 'setup', b.phone);
@@ -195,6 +211,12 @@ var LOCK_MIN = 15;
    بدون ذلك يصير لكل صيغة عدّاد مستقل (05… و966… و+966…)
    فيتجاوز المخمِّن الحدَّ بمجرد تبديل الصيغة كل خمس محاولات. */
 function lockKey(phone) { return 'f_' + canonPhone(phone); }
+
+/* الصيغة المعتمدة للتخزين والعرض: 05xxxxxxxx بلا مفتاح دولة */
+function local05(v) {
+  var d = canonPhone(v);
+  return /^5[0-9]{8}$/.test(d) ? '0' + d : String(v === undefined || v === null ? '' : v);
+}
 
 function tries(phone) {
   var p = PropertiesService.getScriptProperties().getProperty(lockKey(phone));
@@ -417,7 +439,7 @@ function addUser(b, u) {
   var us = rows('Users');
   for (var i = 0; i < us.length; i++) if (samePhone(us[i].phone, b.phone)) return { error: 'DUP_PHONE' };
   var salt = uid();
-  append('Users', { id: uid(), phone: b.phone, name: b.name, role: b.role || 'operator',
+  append('Users', { id: uid(), phone: local05(b.phone), name: b.name, role: b.role || 'operator',
     hash: salt + '$' + hash(b.pass, salt), active: true, created: now() });
   log(u, 'adduser', b.phone + ' / ' + b.role);
   return { ok: 1 };
