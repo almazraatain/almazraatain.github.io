@@ -191,22 +191,30 @@ function setup(b) {
 var MAX_TRIES = 5;
 var LOCK_MIN = 15;
 
+/* مفتاح القفل يُبنى على الرقم بعد توحيده لا على نصّه كما أُرسل.
+   بدون ذلك يصير لكل صيغة عدّاد مستقل (05… و966… و+966…)
+   فيتجاوز المخمِّن الحدَّ بمجرد تبديل الصيغة كل خمس محاولات. */
+function lockKey(phone) { return 'f_' + canonPhone(phone); }
+
 function tries(phone) {
-  var p = PropertiesService.getScriptProperties().getProperty('f_' + phone);
+  var p = PropertiesService.getScriptProperties().getProperty(lockKey(phone));
   return p ? JSON.parse(p) : { n: 0, at: 0 };
 }
 
 function bump(phone, ok) {
   var props = PropertiesService.getScriptProperties();
-  if (ok) { props.deleteProperty('f_' + phone); return; }
+  if (ok) { props.deleteProperty(lockKey(phone)); return; }
   var rec = tries(phone);
   rec.n++; rec.at = Date.now();
-  props.setProperty('f_' + phone, JSON.stringify(rec));
+  props.setProperty(lockKey(phone), JSON.stringify(rec));
 }
 
 /* مقارنة الجوال بالأرقام فقط — تنجح حتى لو أزالت Sheets علامة + */
 function digitsOf(v) {
   var s = String(v === undefined || v === null ? '' : v);
+  /* الأرقام العربية-الهندية والفارسية تُحوَّل قبل أي معالجة */
+  s = s.replace(/[\u0660-\u0669]/g, function (c) { return c.charCodeAt(0) - 0x0660; })
+       .replace(/[\u06F0-\u06F9]/g, function (c) { return c.charCodeAt(0) - 0x06F0; });
   /* Sheets قد تعرض الأرقام الطويلة بصيغة علمية مثل 9.665E+11 */
   if (/^\d+(\.\d+)?[eE][+-]?\d+$/.test(s)) {
     var n = Number(s);
@@ -214,14 +222,19 @@ function digitsOf(v) {
   }
   return s.replace(/[^0-9]/g, '');
 }
+/* صيغة قياسية واحدة للرقم مهما كُتب:
+   05x · 5x · 9665x · +9665x · 009665x  ->  5x
+   تستخدمها المطابقة ومفتاح القفل معًا حتى لا يختلفا. */
+function canonPhone(v) {
+  var d = digitsOf(v);
+  d = d.replace(/^0+/, '');
+  if (d.indexOf('966') === 0) d = d.substring(3);
+  return d.replace(/^0+/, '');
+}
+
 function samePhone(a, b) {
-  var x = digitsOf(a), y = digitsOf(b);
-  if (!x || !y) return false;
-  if (x === y) return true;
-  /* 0501234567 مقابل 966501234567 */
-  var nx = x.indexOf('966') === 0 ? x.substring(3) : x.replace(/^0/, '');
-  var ny = y.indexOf('966') === 0 ? y.substring(3) : y.replace(/^0/, '');
-  return nx === ny && nx.length >= 9;
+  var x = canonPhone(a), y = canonPhone(b);
+  return !!x && x === y && x.length >= 9;
 }
 
 /* الحقول المنطقية قد تعود نصًا من Sheets */
@@ -557,8 +570,7 @@ function resetAdminPassword() {
   var salt = uid();
   s.getRange(target._row, COLS.Users.indexOf('hash') + 1).setValue(salt + '$' + hash(pass, salt));
   s.getRange(target._row, COLS.Users.indexOf('active') + 1).setValue(true);
-  PropertiesService.getScriptProperties().deleteProperty('f_' + target.phone);
-  PropertiesService.getScriptProperties().deleteProperty('f_+' + digitsOf(target.phone));
+  bump(target.phone, true);
 
   Logger.log('=======================================');
   Logger.log('رقم الجوال المسجّل : ' + target.phone);
