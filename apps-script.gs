@@ -196,10 +196,12 @@ function log(user, action, detail) {
 function setup(b) {
   if (rows('Users').length > 0) return { error: 'ALREADY_SETUP' };
   if (!b.pass || b.pass.length < 8) return { error: 'SHORT_PASS' };
+  var em = canonEmail(b.email);
+  if (!validEmail(em)) return { error: 'BAD_EMAIL' };
   var id = uid(), salt = uid();
   var nm = b.name || 'Admin';
   append('Users', { id: id, phone: local05(b.phone), name: nm, role: 'admin',
-    hash: salt + '$' + hash(b.pass, salt), active: true, created: now() });
+    hash: salt + '$' + hash(b.pass, salt), active: true, created: now(), email: em });
   var user = { id: id, name: nm, role: 'admin' };
   log(user, 'setup', b.phone);
   return { ok: 1, t: mkToken(id), user: user };
@@ -213,6 +215,12 @@ var LOCK_MIN = 15;
    بدون ذلك يصير لكل صيغة عدّاد مستقل (05… و966… و+966…)
    فيتجاوز المخمِّن الحدَّ بمجرد تبديل الصيغة كل خمس محاولات. */
 function lockKey(phone) { return 'f_' + canonPhone(phone); }
+
+/* المعرّف قد يكون بريدًا أو جوالًا — مفتاح القفل يتبعه */
+function idKey(raw) {
+  var v = String(raw === undefined || raw === null ? '' : raw);
+  return v.indexOf('@') >= 0 ? ('fe_' + canonEmail(v)) : lockKey(v);
+}
 
 /* الصيغة المعتمدة للتخزين والعرض: 05xxxxxxxx بلا مفتاح دولة */
 function local05(v) {
@@ -265,24 +273,35 @@ function samePhone(a, b) {
 function isTrue(v) { return v === true || String(v).toUpperCase() === 'TRUE'; }
 
 function login(b) {
-  var phone = String(b.phone);
-  var rec = tries(phone);
+  /* المعرّف: البريد أولًا، ويُقبل الجوال أيضًا للحسابات القديمة بلا بريد */
+  var raw = String(b.id !== undefined && b.id !== null && b.id !== ''
+    ? b.id : (b.phone === undefined || b.phone === null ? '' : b.phone));
+  var byEmail = raw.indexOf('@') >= 0;
+  var key = idKey(raw);
+
+  var props = PropertiesService.getScriptProperties();
+  var p = props.getProperty(key);
+  var rec = p ? JSON.parse(p) : { n: 0, at: 0 };
   var mins = (Date.now() - rec.at) / 60000;
   if (rec.n >= MAX_TRIES && mins < LOCK_MIN) return { error: 'LOCKED' };
-  if (mins >= LOCK_MIN) bump(phone, true);
+  if (mins >= LOCK_MIN) props.deleteProperty(key);
 
   var us = rows('Users');
   for (var i = 0; i < us.length; i++) {
     var u = us[i];
-    if (samePhone(u.phone, phone) && isTrue(u.active)) {
+    var hit = byEmail
+      ? (canonEmail(u.email) !== '' && canonEmail(u.email) === canonEmail(raw))
+      : samePhone(u.phone, raw);
+    if (hit && isTrue(u.active)) {
       var parts = String(u.hash).split('$');
       if (hash(b.pass, parts[0]) === parts[1]) {
-        bump(phone, true);
+        props.deleteProperty(key);
         return { ok: 1, t: mkToken(u.id), user: { id: u.id, name: u.name, role: u.role } };
       }
     }
   }
-  bump(phone, false);
+  rec.n++; rec.at = Date.now();
+  props.setProperty(key, JSON.stringify(rec));
   return { error: 'BAD_LOGIN' };
 }
 

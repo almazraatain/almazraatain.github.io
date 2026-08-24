@@ -845,69 +845,20 @@ function viewAuth() {
     '<span class="login-logo">ف</span><h1>مزرعة قرضة ورظف</h1>' +
     '<p>' + (setup ? 'أنشئ حساب المدير لأول مرة' : 'أدخل بياناتك للوصول إلى المنصة') + '</p>' +
     (setup ? '<label>الاسم<input id="aName" required value="عبدالاله آل جابر"></label>' : '') +
-    '<label>رقم الجوال<input id="aPhone" required inputmode="tel" autocomplete="tel" placeholder="05xxxxxxxx"></label>' +
-    '<label>كلمة المرور<input id="aPass" required type="password" minlength="8" autocomplete="' + (setup ? 'new-password' : 'current-password') + '" placeholder="8 خانات على الأقل"></label>' +
-    (setup ? '<p class="password-hint">اختر أي تركيبة من الأحرف والأرقام والرموز واحفظها في مكان آمن — لا يمكن استرجاعها.</p>' : '') +
+    '<label>البريد الإلكتروني<input id="aId" required type="' + (setup ? 'email' : 'text') + '" ' +
+      'inputmode="email" autocomplete="' + (setup ? 'email' : 'username') + '" dir="ltr" ' +
+      'placeholder="name@example.com"></label>' +
+    (setup
+      ? '<label>رقم الجوال<input id="aPhone" required inputmode="tel" dir="ltr" placeholder="05xxxxxxxx"></label>'
+      : '<p class="hintline">تقدر تدخل برقم جوالك أيضًا إن كان حسابك بلا بريد</p>') +
+    '<label>كلمة المرور<input id="aPass" required type="password" minlength="8" autocomplete="' +
+      (setup ? 'new-password' : 'current-password') + '" placeholder="8 خانات على الأقل"></label>' +
+    (setup ? '<p class="password-hint">البريد يُستخدم للدخول ولاستعادة كلمة المرور — تأكد من صحته.</p>' : '') +
     '<p class="login-error hidden" id="aErr"></p>' +
     '<button class="primary" id="aBtn">' + (setup ? 'إنشاء حساب المدير' : 'تسجيل الدخول') + '</button>' +
     (setup ? '' : '<button type="button" class="linkbtn" data-act="forgotOpen">نسيت كلمة المرور؟</button>') +
     '<small>اتصال مشفر · البيانات محفوظة في حسابك على Google</small>' +
     '</form></main>';
-}
-
-/* ── استعادة كلمة المرور بالبريد ── */
-function viewForgot() {
-  var sent = S.authMode === 'reset';
-  return '<main dir="rtl" class="login-page"><form class="login-card" id="fgForm">' +
-    '<span class="login-logo">ف</span><h1>استعادة كلمة المرور</h1>' +
-    '<p>' + (sent
-      ? 'أرسلنا رمزًا من ست خانات إلى بريدك. تحقق من صندوق الوارد ومجلد الرسائل غير المرغوبة.'
-      : 'أدخل بريدك الإلكتروني المسجّل في النظام') + '</p>' +
-    '<label>البريد الإلكتروني<input id="fgEmail" required type="email" inputmode="email" ' +
-      'autocomplete="email" dir="ltr" placeholder="name@example.com" value="' + esc(S.fgEmail || '') + '"' +
-      (sent ? ' readonly' : '') + '></label>' +
-    (sent
-      ? '<label>رمز التحقق<input id="fgCode" required inputmode="numeric" dir="ltr" ' +
-          'maxlength="6" placeholder="000000" style="letter-spacing:8px;text-align:center;font-size:20px"></label>' +
-        '<label>كلمة المرور الجديدة<input id="fgPass" required type="password" minlength="8" ' +
-          'autocomplete="new-password" placeholder="8 خانات على الأقل"></label>'
-      : '') +
-    '<p class="login-error hidden" id="fgErr"></p>' +
-    '<button class="primary" id="fgBtn">' + (sent ? 'تعيين كلمة المرور' : 'إرسال الرمز') + '</button>' +
-    (sent ? '<button type="button" class="linkbtn" data-act="forgotAgain">إرسال رمز جديد</button>' : '') +
-    '<button type="button" class="linkbtn" data-act="forgotBack">→ رجوع لتسجيل الدخول</button>' +
-    '</form></main>';
-}
-
-function bindForgot() {
-  var f = document.getElementById('fgForm');
-  if (!f) return;
-  f.onsubmit = function (e) {
-    e.preventDefault();
-    var btn = document.getElementById('fgBtn'), err = document.getElementById('fgErr');
-    var sent = S.authMode === 'reset';
-    function fail(m) { err.textContent = m; err.className = 'login-error'; btn.disabled = false; btn.textContent = sent ? 'تعيين كلمة المرور' : 'إرسال الرمز'; }
-    err.className = 'login-error hidden';
-    btn.disabled = true; btn.textContent = 'جارٍ…';
-
-    if (!sent) {
-      var em = (val('fgEmail') || '').trim();
-      call('forgot', { email: em })
-        .then(function () { S.fgEmail = em; S.authMode = 'reset'; render(); })
-        .catch(function (x) { fail(x.message); });
-      return;
-    }
-    var code = (val('fgCode') || '').trim();
-    var pass = val('fgPass') || '';
-    if (pass.length < 8) return fail('كلمة المرور 8 خانات على الأقل');
-    call('reset', { email: S.fgEmail, code: code, pass: pass })
-      .then(function () {
-        S.authMode = 'login'; S.fgEmail = '';
-        render();
-        toast('تم تغيير كلمة المرور — سجّل الدخول الآن', 'good');
-      })
-      .catch(function (x) { fail(x.message); });
-  };
 }
 
 function bindAuth() {
@@ -927,23 +878,39 @@ function bindAuth() {
     e.preventDefault();
     var btn = document.getElementById('aBtn'), errBox = document.getElementById('aErr');
     var setup = S.authMode === 'setup';
-    var phone;
-    try { phone = phoneNorm(document.getElementById('aPhone').value); }
-    catch (x) { errBox.textContent = x.message; errBox.className = 'login-error'; return; }
-    var pass = document.getElementById('aPass').value;
-    var name = setup ? document.getElementById('aName').value.trim() : '';
-    btn.disabled = true; btn.textContent = 'جارٍ التحقق…'; errBox.className = 'login-error hidden';
-    call(setup ? 'setup' : 'login', { phone: phone, pass: pass, name: name })
+    var idv = (val('aId') || '').trim();
+    var pass = val('aPass') || '';
+    var name = setup ? (val('aName') || '').trim() : '';
+
+    function fail(m) {
+      errBox.textContent = m; errBox.className = 'login-error';
+      btn.disabled = false; btn.textContent = setup ? 'إنشاء حساب المدير' : 'تسجيل الدخول';
+    }
+    errBox.className = 'login-error hidden';
+
+    var payload = { pass: pass, name: name };
+    if (setup) {
+      if (idv.indexOf('@') < 0) return fail('أدخل بريدًا إلكترونيًا صحيحًا');
+      payload.email = idv;
+      try { payload.phone = phoneNorm(val('aPhone')); }
+      catch (x) { return fail(x.message); }
+    } else {
+      if (!idv) return fail('أدخل بريدك الإلكتروني');
+      /* الجوال مقبول أيضًا للحسابات القديمة بلا بريد */
+      payload.id = idv.indexOf('@') >= 0 ? idv : (function () {
+        try { return phoneNorm(idv); } catch (x) { return idv; }
+      })();
+    }
+
+    btn.disabled = true; btn.textContent = 'جارٍ التحقق…';
+    call(setup ? 'setup' : 'login', payload)
       .then(function (d) {
         S.token = d.t; S.user = d.user;
         localStorage.setItem('mzr_token', d.t);
         return refresh();
       })
       .then(function () { S.view = 'home'; render(); toast('أهلًا بك ' + S.user.name, 'good'); })
-      .catch(function (x) {
-        errBox.textContent = x.message; errBox.className = 'login-error';
-        btn.disabled = false; btn.textContent = setup ? 'إنشاء حساب المدير' : 'تسجيل الدخول';
-      });
+      .catch(function (x) { fail(x.message); });
   };
 }
 

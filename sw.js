@@ -1,7 +1,7 @@
 /* عامل الخدمة — يخزّن ملفات التطبيق ليعمل بلا إنترنت */
-var CACHE = 'mzr-v12';
+var CACHE = 'mzr-v13';
 var SHELL = [
-  './', './index.html', './app.js?v=12', './styles.css?v=12',
+  './', './index.html', './app.js?v=13', './styles.css?v=13',
   './favicon.svg', './icon-192.png', './icon-512.png', './manifest.json',
   './lib/jsQR.js', './lib/qrcode.js'
 ];
