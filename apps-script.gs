@@ -3,7 +3,7 @@ var SS = SpreadsheetApp.getActive();
 var PHOTOS = 'almazraatain-photos';
 
 var COLS = {
-  Users: ['id','phone','name','role','hash','active','created'],
+  Users: ['id','phone','name','role','hash','active','created','email'],
   Sessions: ['token','userId','expires'],
   Harvests: ['id','date','capturedAt','farm','baskets','batch','photo','lat','lng','device','gate','aiBaskets','aiQuality','aiNotes','userId','userName','void','voidReason','opId'],
   Sales: ['id','date','capturedAt','farm','baskets','gross','commission','transport','net','ptype','customer','due','lat','lng','device','userId','userName','void','voidReason','opId'],
@@ -22,6 +22,8 @@ function doPost(e) {
     if (b.a === 'status') return j({ needsSetup: rows('Users').length === 0 });
     if (b.a === 'setup') return j(setup(b));
     if (b.a === 'login') return j(login(b));
+    if (b.a === 'forgot') return j(forgot(b));
+    if (b.a === 'reset') return j(resetPass(b));
     var u = auth(b.t);
     if (!u) return j({ error: 'NO_SESSION' });
     if (b.a === 'all') return j(all(u));
@@ -436,11 +438,16 @@ function voidRow(b, u) {
 function addUser(b, u) {
   if (u.role !== 'admin') return { error: 'NOT_ADMIN' };
   if (!b.pass || b.pass.length < 8) return { error: 'SHORT_PASS' };
+  var em = canonEmail(b.email);
+  if (em && !validEmail(em)) return { error: 'BAD_EMAIL' };
   var us = rows('Users');
-  for (var i = 0; i < us.length; i++) if (samePhone(us[i].phone, b.phone)) return { error: 'DUP_PHONE' };
+  for (var i = 0; i < us.length; i++) {
+    if (samePhone(us[i].phone, b.phone)) return { error: 'DUP_PHONE' };
+    if (em && canonEmail(us[i].email) === em) return { error: 'DUP_EMAIL' };
+  }
   var salt = uid();
   append('Users', { id: uid(), phone: local05(b.phone), name: b.name, role: b.role || 'operator',
-    hash: salt + '$' + hash(b.pass, salt), active: true, created: now() });
+    hash: salt + '$' + hash(b.pass, salt), active: true, created: now(), email: em });
   log(u, 'adduser', b.phone + ' / ' + b.role);
   return { ok: 1 };
 }
@@ -566,6 +573,14 @@ function setUser(b, u) {
         s.getRange(us[i]._row, COLS.Users.indexOf('hash') + 1).setValue(salt + '$' + hash(b.pass, salt));
       }
       if (b.role) s.getRange(us[i]._row, COLS.Users.indexOf('role') + 1).setValue(b.role);
+      if (b.email !== undefined) {
+        var nem = canonEmail(b.email);
+        if (nem && !validEmail(nem)) return { error: 'BAD_EMAIL' };
+        for (var k = 0; k < us.length; k++) {
+          if (us[k].id !== b.id && nem && canonEmail(us[k].email) === nem) return { error: 'DUP_EMAIL' };
+        }
+        s.getRange(us[i]._row, COLS.Users.indexOf('email') + 1).setValue(nem);
+      }
       log(u, 'setuser', b.id);
       return { ok: 1 };
     }
@@ -609,4 +624,109 @@ function listUsers() {
     Logger.log((i + 1) + ') ' + us[i].name + ' | ' + us[i].phone +
       ' | ' + us[i].role + ' | ' + (isTrue(us[i].active) ? 'نشط' : 'معطّل'));
   }
+}
+
+
+/* ═══════════ استعادة كلمة المرور بالبريد ═══════════ */
+var RESET_TTL_MIN = 15;      /* صلاحية الرمز */
+var RESET_MAX_TRIES = 5;     /* محاولات إدخال الرمز */
+var RESET_COOLDOWN_SEC = 60; /* بين طلبين لنفس البريد */
+
+function canonEmail(v) { return String(v === undefined || v === null ? '' : v).trim().toLowerCase(); }
+function validEmail(v) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v); }
+function escHtml(v) {
+  return String(v === undefined || v === null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function resetKey(email) { return 'r_' + canonEmail(email); }
+
+function findByEmail(em) {
+  var us = rows('Users');
+  for (var i = 0; i < us.length; i++) {
+    if (canonEmail(us[i].email) === em && isTrue(us[i].active)) return us[i];
+  }
+  return null;
+}
+
+/* يرد بنجاح دائمًا — حتى لا يكشف أي بريد مسجّل في النظام */
+function forgot(b) {
+  var em = canonEmail(b.email);
+  if (!validEmail(em)) return { error: 'BAD_EMAIL' };
+
+  var props = PropertiesService.getScriptProperties();
+  var key = resetKey(em);
+  var prev = props.getProperty(key);
+  if (prev) {
+    try {
+      var old = JSON.parse(prev);
+      /* منع إغراق البريد بالطلبات المتتابعة */
+      if (Date.now() - old.at < RESET_COOLDOWN_SEC * 1000) return { ok: 1 };
+    } catch (x) {}
+  }
+
+  var target = findByEmail(em);
+  if (!target) return { ok: 1 };
+
+  var code = String(Math.floor(100000 + Math.random() * 900000));
+  props.setProperty(key, JSON.stringify({ code: code, at: Date.now(), tries: 0, id: target.id }));
+
+  MailApp.sendEmail({
+    to: em,
+    subject: 'رمز استعادة كلمة المرور — مزرعة قرضة ورظف',
+    htmlBody:
+      '<div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;font-size:15px;color:#14211c">' +
+      '<p>مرحبًا ' + escHtml(target.name) + '،</p>' +
+      '<p>رمز استعادة كلمة المرور الخاص بك:</p>' +
+      '<p style="font-size:32px;font-weight:bold;letter-spacing:8px;direction:ltr;' +
+      'background:#e9f4ef;color:#174c3b;padding:14px;border-radius:10px;text-align:center">' + code + '</p>' +
+      '<p>الرمز صالح لمدة ' + RESET_TTL_MIN + ' دقيقة.</p>' +
+      '<p style="color:#6c7973">إن لم تطلب الاستعادة فتجاهل هذه الرسالة، ولم يتغيّر شيء في حسابك.</p>' +
+      '</div>'
+  });
+  log(null, 'forgot', em);
+  return { ok: 1 };
+}
+
+function resetPass(b) {
+  var em = canonEmail(b.email);
+  var props = PropertiesService.getScriptProperties();
+  var key = resetKey(em);
+  var raw = props.getProperty(key);
+  if (!raw) return { error: 'BAD_CODE' };
+
+  var rec;
+  try { rec = JSON.parse(raw); } catch (x) { props.deleteProperty(key); return { error: 'BAD_CODE' }; }
+
+  if (Date.now() - rec.at > RESET_TTL_MIN * 60000) { props.deleteProperty(key); return { error: 'CODE_EXPIRED' }; }
+  if (rec.tries >= RESET_MAX_TRIES) { props.deleteProperty(key); return { error: 'CODE_LOCKED' }; }
+
+  if (String(b.code === undefined || b.code === null ? '' : b.code).trim() !== rec.code) {
+    rec.tries++;
+    props.setProperty(key, JSON.stringify(rec));
+    return { error: 'BAD_CODE' };
+  }
+  if (!b.pass || b.pass.length < 8) return { error: 'SHORT_PASS' };
+
+  var us = rows('Users'), sheet = sh('Users'), col = COLS.Users.indexOf('hash') + 1;
+  for (var i = 0; i < us.length; i++) {
+    if (us[i].id === rec.id) {
+      var salt = uid();
+      sheet.getRange(us[i]._row, col).setValue(salt + '$' + hash(b.pass, salt));
+      dirty('Users');
+      props.deleteProperty(key);
+      props.deleteProperty(lockKey(us[i].phone));  /* يفك أي قفل محاولات */
+      killSessions(us[i].id);                      /* يبطل الجلسات القديمة */
+      log(null, 'reset', em);
+      return { ok: 1 };
+    }
+  }
+  return { error: 'BAD_CODE' };
+}
+
+function killSessions(userId) {
+  var sheet = sh('Sessions'), ss = readRows('Sessions'), n = 0;
+  for (var i = ss.length - 1; i >= 0; i--) {
+    if (ss[i].userId === userId) { sheet.deleteRow(ss[i]._row); n++; }
+  }
+  if (n) dirty('Sessions');
 }

@@ -233,3 +233,5 @@ input[type="date"]{direction:ltr;text-align:right}
 .manual summary{cursor:pointer;font-size:13px;font-weight:700;color:var(--green)}
 .manual label{margin:12px 0 8px}
 .manual input{direction:ltr;text-align:left}
+.linkbtn{display:block;width:100%;border:0;background:none;color:var(--green);font:inherit;font-size:13px;font-weight:700;padding:12px 0 0;cursor:pointer}
+.linkbtn:hover{text-decoration:underline}

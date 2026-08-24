@@ -27,6 +27,11 @@ var ERR = {
   NO_SESSION: 'انتهت الجلسة، سجّل الدخول من جديد', BAD_ACTION: 'أمر غير معروف',
   ALREADY_SETUP: 'تم إعداد النظام مسبقًا', SHORT_PASS: 'كلمة المرور 8 خانات على الأقل',
   BAD_LOGIN: 'رقم الجوال أو كلمة المرور غير صحيحة',
+  BAD_EMAIL: 'صيغة البريد الإلكتروني غير صحيحة',
+  DUP_EMAIL: 'هذا البريد مسجّل لمستخدم آخر',
+  BAD_CODE: 'الرمز غير صحيح',
+  CODE_EXPIRED: 'انتهت صلاحية الرمز، اطلب رمزًا جديدًا',
+  CODE_LOCKED: 'تجاوزت عدد المحاولات، اطلب رمزًا جديدًا',
   LOCKED: 'تم قفل الدخول لهذا الرقم 15 دقيقة بعد 5 محاولات فاشلة', BAD_BASKETS: 'عدد السلال غير صالح',
   NEED_PHOTO: 'الصورة مطلوبة', NO_STOCK: 'لا يمكن بيع أكثر من المخزون المتاح',
   NEG_NET: 'العمولة والنقل أكبر من إجمالي البيع',
@@ -760,7 +765,12 @@ var NAV = [
 function roleName(r) { return r === 'admin' ? 'المدير' : r === 'operator' ? 'مشغّل' : 'مطّلع'; }
 
 function render() {
-  if (!S.user) { root.innerHTML = viewAuth(); bindAuth(); return; }
+  if (!S.user) {
+    if (S.authMode === 'forgot' || S.authMode === 'reset') {
+      root.innerHTML = viewForgot(); bindForgot(); return;
+    }
+    root.innerHTML = viewAuth(); bindAuth(); return;
+  }
   var body =
     S.view === 'harvest' ? viewHarvest() :
     S.view === 'sale' ? viewSale() :
@@ -840,8 +850,64 @@ function viewAuth() {
     (setup ? '<p class="password-hint">اختر أي تركيبة من الأحرف والأرقام والرموز واحفظها في مكان آمن — لا يمكن استرجاعها.</p>' : '') +
     '<p class="login-error hidden" id="aErr"></p>' +
     '<button class="primary" id="aBtn">' + (setup ? 'إنشاء حساب المدير' : 'تسجيل الدخول') + '</button>' +
+    (setup ? '' : '<button type="button" class="linkbtn" data-act="forgotOpen">نسيت كلمة المرور؟</button>') +
     '<small>اتصال مشفر · البيانات محفوظة في حسابك على Google</small>' +
     '</form></main>';
+}
+
+/* ── استعادة كلمة المرور بالبريد ── */
+function viewForgot() {
+  var sent = S.authMode === 'reset';
+  return '<main dir="rtl" class="login-page"><form class="login-card" id="fgForm">' +
+    '<span class="login-logo">ف</span><h1>استعادة كلمة المرور</h1>' +
+    '<p>' + (sent
+      ? 'أرسلنا رمزًا من ست خانات إلى بريدك. تحقق من صندوق الوارد ومجلد الرسائل غير المرغوبة.'
+      : 'أدخل بريدك الإلكتروني المسجّل في النظام') + '</p>' +
+    '<label>البريد الإلكتروني<input id="fgEmail" required type="email" inputmode="email" ' +
+      'autocomplete="email" dir="ltr" placeholder="name@example.com" value="' + esc(S.fgEmail || '') + '"' +
+      (sent ? ' readonly' : '') + '></label>' +
+    (sent
+      ? '<label>رمز التحقق<input id="fgCode" required inputmode="numeric" dir="ltr" ' +
+          'maxlength="6" placeholder="000000" style="letter-spacing:8px;text-align:center;font-size:20px"></label>' +
+        '<label>كلمة المرور الجديدة<input id="fgPass" required type="password" minlength="8" ' +
+          'autocomplete="new-password" placeholder="8 خانات على الأقل"></label>'
+      : '') +
+    '<p class="login-error hidden" id="fgErr"></p>' +
+    '<button class="primary" id="fgBtn">' + (sent ? 'تعيين كلمة المرور' : 'إرسال الرمز') + '</button>' +
+    (sent ? '<button type="button" class="linkbtn" data-act="forgotAgain">إرسال رمز جديد</button>' : '') +
+    '<button type="button" class="linkbtn" data-act="forgotBack">→ رجوع لتسجيل الدخول</button>' +
+    '</form></main>';
+}
+
+function bindForgot() {
+  var f = document.getElementById('fgForm');
+  if (!f) return;
+  f.onsubmit = function (e) {
+    e.preventDefault();
+    var btn = document.getElementById('fgBtn'), err = document.getElementById('fgErr');
+    var sent = S.authMode === 'reset';
+    function fail(m) { err.textContent = m; err.className = 'login-error'; btn.disabled = false; btn.textContent = sent ? 'تعيين كلمة المرور' : 'إرسال الرمز'; }
+    err.className = 'login-error hidden';
+    btn.disabled = true; btn.textContent = 'جارٍ…';
+
+    if (!sent) {
+      var em = (val('fgEmail') || '').trim();
+      call('forgot', { email: em })
+        .then(function () { S.fgEmail = em; S.authMode = 'reset'; render(); })
+        .catch(function (x) { fail(x.message); });
+      return;
+    }
+    var code = (val('fgCode') || '').trim();
+    var pass = val('fgPass') || '';
+    if (pass.length < 8) return fail('كلمة المرور 8 خانات على الأقل');
+    call('reset', { email: S.fgEmail, code: code, pass: pass })
+      .then(function () {
+        S.authMode = 'login'; S.fgEmail = '';
+        render();
+        toast('تم تغيير كلمة المرور — سجّل الدخول الآن', 'good');
+      })
+      .catch(function (x) { fail(x.message); });
+  };
 }
 
 function bindAuth() {
@@ -1351,7 +1417,10 @@ function tabUsers() {
       var active = u.active === true || u.active === 'TRUE';
       var role = u.role === 'admin' ? 'مدير' : u.role === 'operator' ? 'مشغّل' : 'مطّلع';
       return '<div class="userrow"><div><b>' + esc(u.name) + ' <span class="tag' + (active ? '' : ' grey') + '">' + role + '</span></b>' +
-        '<small>' + esc(phoneShow(u.phone)) + ' · ' + (active ? 'نشط' : 'معطّل') + '</small></div>' +
+        '<small>' + esc(phoneShow(u.phone)) + ' · ' + (active ? 'نشط' : 'معطّل') +
+        (u.email ? ' · ' + esc(u.email) : ' · <b style="color:var(--red)">بلا بريد</b>') + '</small></div>' +
+        '<button class="mini" data-act="chmail" data-id="' + esc(u.id) + '" data-name="' + esc(u.name) +
+        '" data-email="' + esc(u.email || '') + '">البريد</button>' +
         '<button class="mini" data-act="chpass" data-id="' + esc(u.id) + '" data-name="' + esc(u.name) + '">كلمة المرور</button>' +
         (u.id === S.user.id ? '<span class="tag">أنت</span>'
           : '<button class="mini ' + (active ? 'danger' : '') + '" data-act="toggleUser" data-id="' + esc(u.id) + '" data-on="' + (active ? '0' : '1') + '">' + (active ? 'تعطيل' : 'تفعيل') + '</button>') +
@@ -1422,6 +1491,9 @@ document.addEventListener('click', function (e) {
 
   if (a === 'backdrop') { if (e.target === el) closeModal(); return; }
   if (a === 'closeModal' || a === 'camClose') return closeModal();
+  if (a === 'forgotOpen') { S.authMode = 'forgot'; S.fgEmail = ''; render(); return; }
+  if (a === 'forgotBack') { S.authMode = 'login'; render(); return; }
+  if (a === 'forgotAgain') { S.authMode = 'forgot'; render(); return; }
   if (a === 'menuOpen') { S.menu = true; render(); return; }
   if (a === 'menuClose') { S.menu = false; render(); return; }
   if (a === 'camOpen') return openCamera(el.getAttribute('data-title') || 'التقاط صورة');
@@ -1484,6 +1556,7 @@ document.addEventListener('click', function (e) {
   if (a === 'void') return voidModal(el.getAttribute('data-t'), el.getAttribute('data-id'));
   if (a === 'newUser') return userModal();
   if (a === 'chpass') return passModal(el.getAttribute('data-id'), el.getAttribute('data-name'));
+  if (a === 'chmail') return mailModal(el.getAttribute('data-id'), el.getAttribute('data-name'), el.getAttribute('data-email'));
   if (a === 'toggleUser') return toggleUser(el.getAttribute('data-id'), el.getAttribute('data-on') === '1');
 });
 
@@ -1663,6 +1736,7 @@ function userModal() {
   modal('<h3>مستخدم جديد</h3><p>سيتمكن من الدخول برقم جواله وكلمة المرور</p>' +
     '<label>الاسم<input id="uName" required></label>' +
     '<label>رقم الجوال<input id="uPhone" inputmode="tel" placeholder="05xxxxxxxx"></label>' +
+    '<label>البريد الإلكتروني<input id="uEmail" type="email" inputmode="email" dir="ltr" placeholder="name@example.com"></label>' +
     '<label>الصلاحية<select id="uRole"><option value="operator">مشغّل — يسجّل العمليات</option><option value="viewer">مطّلع — قراءة فقط</option><option value="admin">مدير — صلاحية كاملة</option></select></label>' +
     '<label>كلمة المرور<input id="uPass" type="password" minlength="8" placeholder="8 خانات على الأقل"></label>' +
     '<div class="modal-actions"><button data-act="closeModal">إلغاء</button><button class="go" id="uGo">إضافة</button></div>');
@@ -1672,7 +1746,7 @@ function userModal() {
     try { phone = phoneNorm(val('uPhone')); } catch (x) { return toast(x.message, 'bad'); }
     if ((val('uPass') || '').length < 8) return toast('كلمة المرور 8 خانات على الأقل', 'bad');
     var b = this; b.disabled = true; b.textContent = 'جارٍ…';
-    call('adduser', { name: name, phone: phone, role: val('uRole'), pass: val('uPass') })
+    call('adduser', { name: name, phone: phone, role: val('uRole'), pass: val('uPass'), email: (val('uEmail') || '').trim() })
       .then(function () { return refresh(); })
       .then(function () { closeModal(); render(); toast('تمت إضافة المستخدم', 'good'); })
       .catch(function (e) { b.disabled = false; b.textContent = 'إضافة'; toast(e.message, 'bad'); });
@@ -1688,6 +1762,19 @@ function passModal(id, name) {
     var b = this; b.disabled = true; b.textContent = 'جارٍ…';
     call('setuser', { id: id, pass: val('npPass') })
       .then(function () { closeModal(); toast('تم تغيير كلمة المرور', 'good'); })
+      .catch(function (e) { b.disabled = false; b.textContent = 'حفظ'; toast(e.message, 'bad'); });
+  };
+}
+
+function mailModal(id, name, email) {
+  modal('<h3>البريد الإلكتروني</h3><p>' + esc(name) + ' — يُستخدم لاستعادة كلمة المرور</p>' +
+    '<label>البريد<input id="emVal" type="email" dir="ltr" placeholder="name@example.com" value="' + esc(email || '') + '"></label>' +
+    '<div class="modal-actions"><button data-act="closeModal">إلغاء</button><button class="go" id="emGo">حفظ</button></div>');
+  document.getElementById('emGo').onclick = function () {
+    var b = this; b.disabled = true; b.textContent = 'جارٍ…';
+    call('setuser', { id: id, email: (val('emVal') || '').trim() })
+      .then(function () { return refresh(); })
+      .then(function () { closeModal(); render(); toast('تم حفظ البريد', 'good'); })
       .catch(function (e) { b.disabled = false; b.textContent = 'حفظ'; toast(e.message, 'bad'); });
   };
 }
