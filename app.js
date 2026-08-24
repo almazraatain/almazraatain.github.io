@@ -3,7 +3,7 @@
 'use strict';
 
 /* ═══════════ الإعدادات ═══════════ */
-var API_DEFAULT = 'https://script.google.com/macros/s/AKfycbyWyEuofHhYo9pe5ILalVYuzzQM2IU1F5XS5q9O1H7Wr8PhvqiArnq3kuMdeu8I_j7NbA/exec';
+var API_DEFAULT = 'https://script.google.com/macros/s/AKfycbyeo8MgfiwUHkC5nyKdOqRcsRQlmL-TA_77Tp2qNyQh3PE9IgVZoVlUiXGMU8FRBdnpSA/exec';
 var API = localStorage.getItem('mzr_api') || API_DEFAULT;
 var KEY = 'mzr-key-2026-almazraatain';
 
