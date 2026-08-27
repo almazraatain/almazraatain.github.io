@@ -28,6 +28,10 @@ var ERR = {
   ALREADY_SETUP: 'تم إعداد النظام مسبقًا', SHORT_PASS: 'كلمة المرور 8 خانات على الأقل',
   BAD_LOGIN: 'رقم الجوال أو كلمة المرور غير صحيحة',
   BAD_EMAIL: 'صيغة البريد الإلكتروني غير صحيحة',
+  BAD_UNIT: 'نوع التعبئة غير معروف',
+  SAME_UNIT: 'اختر نوعين مختلفين للتعبئة',
+  BAD_QTY: 'أدخل كميات صحيحة',
+  NO_UNITS: 'لا بد من نوع واحد على الأقل',
   DUP_EMAIL: 'هذا البريد مسجّل لمستخدم آخر',
   BAD_CODE: 'الرمز غير صحيح',
   CODE_EXPIRED: 'انتهت صلاحية الرمز، اطلب رمزًا جديدًا',
@@ -59,7 +63,8 @@ var S = {
   located: false,
   photo: null,
   queue: [], syncing: false, online: navigator.onLine,
-  db: { harvests: [], sales: [], expenses: [], payments: [], users: [] }
+  units: ['صندوق', 'بوكس', 'سلة'],
+  db: { harvests: [], sales: [], expenses: [], payments: [], packing: [], users: [] }
 };
 
 var root = document.getElementById('root');
@@ -505,7 +510,7 @@ function aiHarvestBox() {
   return '<div class="ai-hint ' + (big ? 'warn' : 'ok') + '">' +
     '<b>' + (S.aiQuality ? 'جودة المحصول ' + num(S.aiQuality) + '٪' : 'تحليل الصورة') + '</b>' +
     '<small>' + (S.aiNotes ? esc(S.aiNotes) + ' · ' : '') +
-    (ai ? 'تقدير آلي: ' + num(ai) + ' سلة' + (mine ? ' مقابل ' + num(mine) + ' أدخلتها' : '') : 'تعذّر عدّ السلال') +
+    (ai ? 'تقدير آلي: ' + num(ai) + ' ' + (S.unit || S.units[0]) + (mine ? ' مقابل ' + num(mine) + ' أدخلتها' : '') : 'تعذّر عدّ السلال') +
     (big ? ' — الفارق كبير، تأكد من العدد' : '') + '</small></div>';
 }
 
@@ -653,7 +658,7 @@ function handleCode(code) {
 
 function batchModal(h) {
   modal('<h3>تشغيلة ' + esc(h.batch) + '</h3><p>مزرعة ' + esc(h.farm) + ' · ' + esc(dt(h.date)) + ' — ' + esc(tm(h.date)) + '</p>' +
-    '<div class="sum-line"><span>عدد السلال</span><b>' + num(h.baskets) + '</b></div>' +
+    '<div class="sum-line"><span>الكمية</span><b>' + num(h.baskets) + ' ' + esc(unitOf(h)) + '</b></div>' +
     (h.aiQuality ? '<div class="sum-line"><span>الجودة المقدَّرة</span><b>' + num(h.aiQuality) + '٪</b></div>' : '') +
     (h.aiNotes ? '<div class="sum-line"><span>ملاحظة</span><b>' + esc(h.aiNotes) + '</b></div>' : '') +
     '<div class="sum-line"><span>سجّلها</span><b>' + esc(h.userName) + '</b></div>' +
@@ -688,22 +693,73 @@ function live(list) {
 function D() {
   return {
     H: live(S.db.harvests), Sa: live(S.db.sales),
-    E: live(S.db.expenses), P: live(S.db.payments)
+    E: live(S.db.expenses), P: live(S.db.payments), K: live(S.db.packing)
   };
 }
-function stockOf(farm) {
+
+/* السجلات القديمة سُجّلت قبل إضافة الأنواع فتُنسب لـ«سلة» */
+function unitOf(r) {
+  var v = String(r.unit == null ? '' : r.unit).trim();
+  return v || 'سلة';
+}
+function stockOf(farm, unit) {
   var d = D(), t = 0;
-  d.H.forEach(function (r) { if (r.farm === farm) t += Number(r.baskets) || 0; });
-  d.Sa.forEach(function (r) { if (r.farm === farm) t -= Number(r.baskets) || 0; });
+  d.H.forEach(function (r) { if (r.farm === farm && unitOf(r) === unit) t += Number(r.baskets) || 0; });
+  d.Sa.forEach(function (r) { if (r.farm === farm && unitOf(r) === unit) t -= Number(r.baskets) || 0; });
+  d.K.forEach(function (r) {
+    if (r.farm !== farm) return;
+    if (String(r.fromUnit) === unit) t -= Number(r.fromQty) || 0;
+    if (String(r.toUnit) === unit) t += Number(r.toQty) || 0;
+  });
   /* العمليات المحفوظة محليًا تُحتسب حتى لا يُباع أكثر من المتاح دون إنترنت */
   S.queue.forEach(function (q) {
     if (q.status !== 'pending' || !q.rec || q.rec.farm !== farm) return;
-    if (q.t2 === 'Harvests') t += Number(q.rec.baskets) || 0;
-    if (q.t2 === 'Sales') t -= Number(q.rec.baskets) || 0;
+    var qu = String(q.rec.unit || '').trim();
+    if (q.t2 === 'Harvests' && qu === unit) t += Number(q.rec.baskets) || 0;
+    if (q.t2 === 'Sales' && qu === unit) t -= Number(q.rec.baskets) || 0;
+    if (q.t2 === 'Packing') {
+      if (String(q.rec.fromUnit) === unit) t -= Number(q.rec.fromQty) || 0;
+      if (String(q.rec.toUnit) === unit) t += Number(q.rec.toQty) || 0;
+    }
   });
   return t;
 }
-function totalStock() { return FARM_NAMES.reduce(function (a, f) { return a + stockOf(f); }, 0); }
+
+/* يجمع كميات قائمة حسب نوع التعبئة ويكتبها «100 صندوق · 30 بوكس» */
+function byUnit(list, qtyOf, unitFn) {
+  var m = {}, order = [];
+  (list || []).forEach(function (r) {
+    var u = (unitFn || unitOf)(r), q = Number(qtyOf(r)) || 0;
+    if (!(u in m)) { m[u] = 0; order.push(u); }
+    m[u] += q;
+  });
+  return order.filter(function (u) { return m[u] !== 0; })
+              .map(function (u) { return { unit: u, qty: m[u] }; });
+}
+function byUnitText(list, qtyOf, unitFn) {
+  var a = byUnit(list, qtyOf, unitFn);
+  return a.length ? a.map(function (x) { return num(x.qty) + ' ' + x.unit; }).join(' · ') : '0';
+}
+function baskOf(r) { return r.baskets; }
+
+/* الأنواع التي لها حركة فعلية — لعرض المخزون بلا أصفار لا معنى لها */
+function activeUnits() {
+  var seen = {}, out = [];
+  S.units.forEach(function (x) { seen[x] = true; });
+  D().H.forEach(function (r) { seen[unitOf(r)] = true; });
+  D().K.forEach(function (r) { seen[String(r.toUnit)] = true; seen[String(r.fromUnit)] = true; });
+  for (var k in seen) if (seen[k]) out.push(k);
+  return out;
+}
+
+function totalStock(unit) { return FARM_NAMES.reduce(function (a, f) { return a + stockOf(f, unit); }, 0); }
+
+/* ملخص المخزون: [{unit, qty}] للأنواع التي فيها رصيد أو حركة */
+function stockSummary() {
+  return activeUnits().map(function (un) {
+    return { unit: un, qty: totalStock(un) };
+  }).filter(function (x) { return x.qty !== 0; });
+}
 
 function paidFor(saleId) {
   return D().P.reduce(function (a, p) { return p.saleId === saleId ? a + (Number(p.amount) || 0) : a; }, 0);
@@ -757,6 +813,7 @@ var NAV = [
   ['harvest', '▣', 'تسجيل قطاف', 0],
   ['sale', '﷼', 'تسجيل بيع', 0],
   ['expense', '▤', 'تسجيل فاتورة', 0],
+  ['pack', '⇄', 'تعبئة', 0],
   ['collect', '✓', 'التحصيل', 0],
   ['log', '≡', 'سجل الحركات', 0],
   ['admin', '◫', 'لوحة الإدارة', 1]
@@ -775,6 +832,7 @@ function render() {
     S.view === 'harvest' ? viewHarvest() :
     S.view === 'sale' ? viewSale() :
     S.view === 'expense' ? viewExpense() :
+    S.view === 'pack' ? viewPack() :
     S.view === 'collect' ? viewCollect() :
     S.view === 'log' ? viewLog() :
     S.view === 'admin' ? viewAdmin() : viewHome();
@@ -917,7 +975,8 @@ function bindAuth() {
 /* ── الرئيسية ── */
 function viewHome() {
   var d = D(), t = today();
-  var todayHarvest = sumBy(d.H, 'baskets', function (r) { return dayOf(r.date) === t; });
+  var todayList = d.H.filter(function (r) { return dayOf(r.date) === t; });
+  var todayMix = byUnit(todayList, baskOf);
   var todaySales = sumBy(d.Sa, 'net', function (r) { return dayOf(r.date) === t; });
   var late = overdue();
   var acts = recentActivity(6);
@@ -928,7 +987,7 @@ function viewHome() {
   return '' +
   '<section class="hero"><div><span class="eyebrow">' + esc(dt(new Date().toISOString())) + '</span>' +
     '<h1>' + greet + '، ' + esc(String(S.user.name).split(' ')[0]) + '</h1>' +
-    '<p>' + (d.H.length ? 'المخزون الحالي ' + num(totalStock()) + ' سلة جاهزة للبيع.' : 'النظام جاهز لاستقبال أول عملية.') + '</p></div></section>' +
+    '<p>' + (d.H.length ? stockLine() : 'النظام جاهز لاستقبال أول عملية.') + '</p></div></section>' +
 
   '<section class="quick-actions four">' +
     action('harvest', 'green', '▣', 'سجل قطاف', 'صوّر وأدخل عدد السلال') +
@@ -940,8 +999,9 @@ function viewHome() {
   '<section class="content-grid"><div>' +
     '<div class="section-title"><div><h2>نظرة سريعة</h2><p>ملخص المشروع اليوم</p></div></div>' +
     '<div class="stats">' +
-      stat('إنتاج اليوم', num(todayHarvest), 'سلة') +
-      stat('المخزون الحالي', num(totalStock()), 'سلة', totalStock() === 0 && d.H.length ? 'لا يوجد مخزون' : '') +
+      stat('إنتاج اليوم', num(todayMix.length ? todayMix[0].qty : 0), todayMix.length ? todayMix[0].unit : '',
+           todayMix.length > 1 ? todayMix.slice(1).map(function (x) { return num(x.qty) + ' ' + x.unit; }).join(' · ') : '') +
+      stockStat() +
       stat('مبيعات اليوم', num(Math.round(todaySales / 100)), 'ر.س') +
       stat('المستحق الآجل', num(Math.round(outstanding() / 100)), 'ر.س', late.length ? num(late.length) + ' متأخرة' : '', late.length > 0) +
     '</div>' +
@@ -962,9 +1022,47 @@ function viewHome() {
   '<button data-act="go" data-v="' + (late.length ? 'collect' : 'admin') + '">' + (late.length ? 'فتح التحصيل ←' : 'فتح لوحة الإدارة ←') + '</button></section>';
 }
 
+/* منتقي نوع التعبئة — أزرار كبيرة مناسبة للاستخدام في الحقل */
+function unitPicker(cur, act, key) {
+  return '<div class="unit-pick">' + S.units.map(function (u) {
+    return '<button type="button" data-act="' + act + '"' + (key ? ' data-k="' + key + '"' : '') +
+      ' data-u="' + esc(u) + '" class="' + (cur === u ? 'active' : '') + '">' + esc(u) + '</button>';
+  }).join('') + '</div>';
+}
+
+function stockLine() {
+  var sum = stockSummary();
+  if (!sum.length) return 'لا يوجد مخزون متاح للبيع.';
+  return 'المخزون: ' + sum.map(function (x) { return num(x.qty) + ' ' + x.unit; }).join(' · ');
+}
+
+function stockStat() {
+  var sum = stockSummary();
+  if (!sum.length) return stat('المخزون الحالي', '0', '', 'لا يوجد مخزون');
+  var main = sum[0], rest = sum.slice(1);
+  return '<div class="stat"><span>المخزون الحالي</span>' +
+    '<div><b>' + num(main.qty) + '</b><small>' + esc(main.unit) + '</small></div>' +
+    (rest.length ? '<p>' + esc(rest.map(function (x) { return num(x.qty) + ' ' + x.unit; }).join(' · ')) + '</p>' : '') +
+    '</div>';
+}
+
+function farmStockText(f) {
+  var parts = activeUnits().map(function (un) { return { u: un, q: stockOf(f, un) }; })
+    .filter(function (x) { return x.q !== 0; });
+  if (!parts.length) return '0';
+  return parts.map(function (x) { return num(x.q) + ' <small>' + esc(x.u) + '</small>'; }).join('<br>');
+}
+
 function action(v, tone, icon, title, sub) {
   return '<button data-act="go" data-v="' + v + '"><span class="action-icon ' + tone + '">' + icon + '</span>' +
     '<b>' + title + '</b><small>' + sub + '</small><i>←</i></button>';
+}
+/* إجمالي الإنتاج قد يكون بأكثر من نوع — نُبرز الأكبر ونذكر البقية تحته */
+function prodStat(list) {
+  var mix = byUnit(list, baskOf);
+  if (!mix.length) return stat('إجمالي الإنتاج', '0', '');
+  return stat('إجمالي الإنتاج', num(mix[0].qty), mix[0].unit,
+    mix.length > 1 ? mix.slice(1).map(function (x) { return num(x.qty) + ' ' + x.unit; }).join(' · ') : '');
 }
 function stat(label, value, suffix, note, warn) {
   return '<div class="stat"><span>' + esc(label) + '</span><div><b>' + value + '</b><small>' + esc(suffix) + '</small></div>' +
@@ -975,19 +1073,19 @@ function farmCard(f) {
   var mine = d.H.filter(function (r) { return r.farm === f; });
   var last = mine.length ? mine[mine.length - 1] : null;
   var t = today();
-  var todayB = sumBy(mine, 'baskets', function (r) { return dayOf(r.date) === t; });
+  var todayB = byUnitText(mine.filter(function (r) { return dayOf(r.date) === t; }), baskOf);
   return '<div class="farm-card"><div class="farm-name"><span>♧</span><div><b>مزرعة ' + esc(f) + '</b>' +
     '<small>' + (last ? 'آخر جولة ' + esc(dtShort(last.date)) + ' · ' + esc(last.batch) : 'لا توجد عمليات بعد') + '</small></div>' +
     '<em>' + (mine.length ? num(mine.length) + ' جولة' : 'جديدة') + '</em></div>' +
-    '<div><p><span>آخر جولة</span><b>' + num(last ? last.baskets : 0) + ' <small>سلة</small></b></p>' +
-    '<p><span>المخزون</span><b>' + num(stockOf(f)) + ' <small>سلة</small></b></p>' +
-    '<p><span>إنتاج اليوم</span><b>' + num(todayB) + ' <small>سلة</small></b></p></div></div>';
+    '<div><p><span>آخر جولة</span><b>' + (last ? num(last.baskets) + ' <small>' + esc(unitOf(last)) + '</small>' : '0') + '</b></p>' +
+    '<p><span>المخزون</span><b>' + farmStockText(f) + '</b></p>' +
+    '<p><span>إنتاج اليوم</span><b>' + todayB + '</b></p></div></div>';
 }
 
 function recentActivity(n) {
   var d = D(), out = [];
-  d.H.forEach(function (r) { out.push({ date: r.date, tone: 'green', kind: 'قطاف — ' + r.farm, detail: num(r.baskets) + ' سلة · ' + r.batch }); });
-  d.Sa.forEach(function (r) { out.push({ date: r.date, tone: 'red', kind: (r.ptype === 'cash' ? 'بيع نقدي' : 'بيع آجل') + ' — ' + r.farm, detail: num(r.baskets) + ' سلة · ' + riyal(r.net) + ' صافي' }); });
+  d.H.forEach(function (r) { out.push({ date: r.date, tone: 'green', kind: 'قطاف — ' + r.farm, detail: num(r.baskets) + ' ' + unitOf(r) + ' · ' + r.batch }); });
+  d.Sa.forEach(function (r) { out.push({ date: r.date, tone: 'red', kind: (r.ptype === 'cash' ? 'بيع نقدي' : 'بيع آجل') + ' — ' + r.farm, detail: num(r.baskets) + ' ' + unitOf(r) + ' · ' + riyal(r.net) + ' صافي' }); });
   d.E.forEach(function (r) { out.push({ date: r.date, tone: 'red', kind: 'مصروف — ' + r.category, detail: riyal(r.amount) + ' · ' + r.farm }); });
   d.P.forEach(function (r) { out.push({ date: r.date, tone: 'green', kind: 'تحصيل', detail: riyal(r.amount) }); });
   return out.sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); }).slice(0, n);
@@ -1011,8 +1109,10 @@ function viewHarvest() {
     photoBox('صوّر المحصول', 'الكاميرا فقط — لا يمكن الاختيار من الألبوم') +
     (S.photo ? '<button class="ai-btn" data-act="aiHarvest">✨ حلّل الصورة: عدّ السلال وقيّم الجودة</button>' : '') +
     aiHarvestBox() +
-    '<div class="step"><span>3</span><b>عدد السلال</b></div>' +
-    '<div class="counter"><button data-act="dec">−</button><div><strong id="bk">' + num(S.baskets || 0) + '</strong><small>سلة</small></div><button data-act="inc">+</button></div>' +
+    '<div class="step"><span>3</span><b>نوع التعبئة</b></div>' +
+    unitPicker(S.unit || S.units[0], 'unit') +
+    '<div class="step"><span>4</span><b>الكمية</b></div>' +
+    '<div class="counter"><button data-act="dec">−</button><div><strong id="bk">' + num(S.baskets || 0) + '</strong><small>' + esc(S.unit || S.units[0]) + '</small></div><button data-act="inc">+</button></div>' +
     '<div class="quick"><button data-act="add5">+5</button><button data-act="add10">+10</button><button data-act="clr">مسح</button></div>' +
     '<button class="primary" data-act="saveHarvest">حفظ جولة القطاف</button>' +
   '</div>' + aside('قبل الحفظ', ['الصورة إلزامية لكل جولة', 'سيُنشأ رقم تشغيلة تلقائيًا', 'تُضاف السلال للمخزون فورًا', 'يمكن للمدير إلغاء العملية لاحقًا']) +
@@ -1040,15 +1140,20 @@ function allOps() {
   var out = [];
   S.db.harvests.forEach(function (r) {
     out.push({ t: 'harvest', kind: 'جولة قطاف', tone: 'green', icon: '▣', row: r,
-      val: num(r.baskets) + ' سلة', sub: 'مزرعة ' + r.farm + ' · ' + r.batch });
+      val: num(r.baskets) + ' ' + unitOf(r), sub: 'مزرعة ' + r.farm + ' · ' + r.batch });
   });
   S.db.sales.forEach(function (r) {
     out.push({ t: 'sale', kind: r.ptype === 'cash' ? 'بيع نقدي' : 'بيع آجل', tone: 'red', icon: '﷼', row: r,
-      val: riyal(r.net), sub: 'مزرعة ' + r.farm + ' · ' + num(r.baskets) + ' سلة' + (r.customer ? ' · ' + r.customer : '') });
+      val: riyal(r.net), sub: 'مزرعة ' + r.farm + ' · ' + num(r.baskets) + ' ' + unitOf(r) + (r.customer ? ' · ' + r.customer : '') });
   });
   S.db.expenses.forEach(function (r) {
     out.push({ t: 'expense', kind: 'مصروف — ' + r.category, tone: 'gold', icon: '▤', row: r,
       val: riyal(r.amount), sub: r.farm + ' · ' + r.payer + (r.notes ? ' · ' + r.notes : '') });
+  });
+  S.db.packing.forEach(function (r) {
+    out.push({ t: 'packing', kind: 'تعبئة', tone: 'gold', icon: '⇄', row: r,
+      val: num(r.fromQty) + ' ' + r.fromUnit + ' ← ' + num(r.toQty) + ' ' + r.toUnit,
+      sub: 'مزرعة ' + r.farm + (r.notes ? ' · ' + r.notes : '') });
   });
   S.db.payments.forEach(function (r) {
     var sale = S.db.sales.filter(function (s) { return s.id === r.saleId; })[0];
@@ -1085,14 +1190,15 @@ function viewLog() {
 }
 function queuePanel() {
   if (!S.queue.length) return '';
-  var names = { Harvests: 'جولة قطاف', Sales: 'عملية بيع', Expenses: 'مصروف', Payments: 'تحصيل' };
+  var names = { Harvests: 'جولة قطاف', Sales: 'عملية بيع', Expenses: 'مصروف', Payments: 'تحصيل', Packing: 'تعبئة' };
   return '<div class="qpanel">' +
     '<div class="qhead"><b>عمليات لم تُرفع بعد (' + num(S.queue.length) + ')</b>' +
       (failedCount() ? '<button class="mini" data-act="retryQ">إعادة المحاولة</button>' : '') + '</div>' +
     S.queue.map(function (q) {
       var v = q.rec || {};
-      var line = q.t2 === 'Harvests' ? num(v.baskets) + ' سلة · ' + esc(v.farm || '')
-        : q.t2 === 'Sales' ? num(v.baskets) + ' سلة · ' + riyal(v.gross)
+      var line = q.t2 === 'Harvests' ? num(v.baskets) + ' ' + esc(unitOf(v)) + ' · ' + esc(v.farm || '')
+        : q.t2 === 'Sales' ? num(v.baskets) + ' ' + esc(unitOf(v)) + ' · ' + riyal(v.gross)
+        : q.t2 === 'Packing' ? num(v.fromQty) + ' ' + esc(String(v.fromUnit || '')) + ' ← ' + num(v.toQty) + ' ' + esc(String(v.toUnit || ''))
         : q.t2 === 'Expenses' ? riyal(v.amount) + ' · ' + esc(v.category || '')
         : riyal(v.amount);
       return '<div class="qrow ' + q.status + '"><span class="qdot"></span>' +
@@ -1135,7 +1241,7 @@ function logCard(o) {
   if (o.t === 'harvest' && Number(r.aiBaskets) > 0) {
     var mine = Number(r.baskets) || 0, est = Number(r.aiBaskets);
     var off = mine ? Math.abs(est - mine) / mine : 0;
-    if (off > 0.2) chips.push('<span class="chip warn">تقدير آلي ' + num(est) + ' سلة</span>');
+    if (off > 0.2) chips.push('<span class="chip warn">تقدير آلي ' + num(est) + ' ' + esc(unitOf(r)) + '</span>');
   }
   if (o.t === 'harvest') {
     chips.push('<button class="chip btn" data-act="label" data-b="' + esc(r.batch) + '">ملصق QR</button>');
@@ -1146,7 +1252,7 @@ function logCard(o) {
   if (v) chips.push('<span class="chip bad">ملغاة: ' + esc(r.voidReason || '—') + '</span>');
   else if (S.user.role === 'admin' && o.t !== 'payment') {
     chips.push('<button class="chip btn" data-act="void" data-t="' +
-      (o.t === 'harvest' ? 'Harvests' : o.t === 'sale' ? 'Sales' : 'Expenses') +
+      (o.t === 'harvest' ? 'Harvests' : o.t === 'sale' ? 'Sales' : o.t === 'packing' ? 'Packing' : 'Expenses') +
       '" data-id="' + esc(r.id) + '">إلغاء</button>');
   }
 
@@ -1159,17 +1265,20 @@ function logCard(o) {
 
 /* ── البيع ── */
 function viewSale() {
-  var st = stockOf(S.farm);
+  var un = S.unit || S.units[0];
+  var st = stockOf(S.farm, un);
   var customers = uniq(D().Sa.map(function (s) { return s.customer; }).filter(Boolean));
   return '<section class="flow-page">' + head('تسجيل بيع', 'سجّل بيع الحراج النقدي أو الآجل') +
   '<div class="flow-grid"><div class="form-card">' +
     '<label>المزرعة<select id="sFarm">' + FARM_NAMES.map(function (f) {
       return '<option' + (S.farm === f ? ' selected' : '') + '>' + esc(f) + '</option>';
     }).join('') + '</select></label>' +
-    '<div class="stock-line"><span>المخزون المتاح</span><b>' + num(st) + ' سلة</b></div>' +
-    (st > 0 ? '<button class="full-crop" data-act="allStock">بيع كامل المحصول <small>تعبئة ' + num(st) + ' سلة تلقائيًا</small></button>'
+    '<div class="step"><span>◆</span><b>نوع التعبئة</b></div>' +
+    unitPicker(un, 'unit') +
+    '<div class="stock-line"><span>المخزون المتاح</span><b>' + num(st) + ' ' + esc(un) + '</b></div>' +
+    (st > 0 ? '<button class="full-crop" data-act="allStock">بيع كامل المتاح <small>' + num(st) + ' ' + esc(un) + ' تلقائيًا</small></button>'
             : '<p class="empty-state">لا يوجد مخزون في هذه المزرعة. سجّل جولة قطاف أولًا.</p>') +
-    '<div class="two"><label>عدد السلال<input id="sBk" inputmode="numeric" type="number" min="1" max="' + st + '"></label>' +
+    '<div class="two"><label>الكمية (' + esc(un) + ')<input id="sBk" inputmode="numeric" type="number" min="1" max="' + st + '"></label>' +
     '<label>إجمالي البيع (ر.س)<input id="sGross" inputmode="decimal" type="number" min="0" step="0.01"></label></div>' +
     '<div class="two"><label>عمولة الحراج (ر.س)<input id="sComm" inputmode="decimal" type="number" min="0" step="0.01"></label>' +
     '<label>تكلفة النقل (ر.س)<input id="sTrans" inputmode="decimal" type="number" min="0" step="0.01"></label></div>' +
@@ -1184,9 +1293,9 @@ function viewSale() {
   '</div></section>';
 }
 function calcHtml(perB, net, netPerB) {
-  return '<div><small>سعر السلة</small><b>' + riyal(perB) + '</b></div>' +
+  return '<div><small>سعر الوحدة</small><b>' + riyal(perB) + '</b></div>' +
     '<div><small>صافي الحصيلة</small><b>' + riyal(net) + '</b></div>' +
-    '<div><small>صافي سعر السلة</small><b>' + riyal(netPerB) + '</b></div>';
+    '<div><small>صافي سعر الوحدة</small><b>' + riyal(netPerB) + '</b></div>';
 }
 function updateCalc() {
   var box = document.getElementById('calcBox');
@@ -1216,6 +1325,53 @@ function viewExpense() {
     '<button class="primary" data-act="saveExpense">حفظ المصروف</button>' +
   '</div>' + aside('تصنيف سريع', ['يُحفظ المصروف مع صورته', 'المشترك يُقسَّم مناصفة على المزرعتين', 'الدفع الشخصي يُضاف لحساب الشريك', 'لا تُحتسب مساهمة الشريك كإيراد']) +
   '</div></section>';
+}
+
+/* ── التعبئة: تحويل من نوع إلى نوع ── */
+function viewPack() {
+  var from = S.pkFrom || S.units[0];
+  var to = S.pkTo || (S.units[1] || S.units[0]);
+  var avail = stockOf(S.farm, from);
+  return '<section class="flow-page">' + head('تعبئة', 'حوّل من نوع تعبئة إلى آخر') +
+  '<div class="flow-grid"><div class="form-card">' +
+    '<label>المزرعة<select id="kFarm">' + FARM_NAMES.map(function (f) {
+      return '<option' + (S.farm === f ? ' selected' : '') + '>' + esc(f) + '</option>';
+    }).join('') + '</select></label>' +
+    '<div class="step"><span>1</span><b>من نوع</b></div>' +
+    unitPicker(from, 'punit', 'pkFrom') +
+    '<div class="stock-line"><span>المتاح من ' + esc(from) + '</span><b>' + num(avail) + '</b></div>' +
+    '<div class="step"><span>2</span><b>إلى نوع</b></div>' +
+    unitPicker(to, 'punit', 'pkTo') +
+    (from === to ? '<p class="notice">اختر نوعين مختلفين</p>' : '') +
+    '<div class="two">' +
+      '<label>الكمية المستهلكة (' + esc(from) + ')<input id="kFrom" type="number" inputmode="numeric" min="1" max="' + avail + '"></label>' +
+      '<label>الناتج (' + esc(to) + ')<input id="kTo" type="number" inputmode="numeric" min="1"></label>' +
+    '</div>' +
+    '<label>ملاحظات<textarea id="kNotes" placeholder="اختياري…"></textarea></label>' +
+    '<button class="primary" data-act="savePack"' + (avail > 0 && from !== to ? '' : ' disabled') + '>حفظ التعبئة</button>' +
+  '</div>' + aside('كيف تعمل', [
+    'تُنقص الكمية المستهلكة من مخزون النوع الأول',
+    'وتضيف الناتج إلى مخزون النوع الثاني',
+    'لا نفترض نسبة ثابتة — أدخل العدد الفعلي',
+    'الفرق يظهر في التقارير كنسبة تحويل'
+  ]) + '</div></section>';
+}
+
+function savePack(btn) {
+  var from = S.pkFrom || S.units[0], to = S.pkTo || (S.units[1] || S.units[0]);
+  if (from === to) return toast('اختر نوعين مختلفين', 'bad');
+  var fq = Math.round(numOf(val('kFrom'))), tq = Math.round(numOf(val('kTo')));
+  if (!(fq > 0)) return toast('أدخل الكمية المستهلكة', 'bad');
+  if (!(tq > 0)) return toast('أدخل الناتج', 'bad');
+  var avail = stockOf(S.farm, from);
+  if (fq > avail) return toast('المتاح ' + num(avail) + ' ' + from + ' فقط', 'bad');
+  guard(btn, 'حفظ التعبئة', submitOp('Packing', mix({
+    farm: S.farm, fromUnit: from, fromQty: fq, toUnit: to, toQty: tq,
+    notes: (val('kNotes') || '').trim()
+  }), '').then(function (d) {
+    return d.queued ? 'حُفظت التعبئة محليًا وستُرفع عند عودة الإنترنت'
+                    : 'تم تسجيل التعبئة · ' + num(fq) + ' ' + from + ' ← ' + num(tq) + ' ' + to;
+  }));
 }
 
 /* ── التحصيل ── */
@@ -1284,13 +1440,15 @@ function tabOverview() {
     .sort(function (a, b) { return b.v - a.v; });
 
   return '<div class="admin-kpis">' +
-      stat('إجمالي الإنتاج', num(totalB), 'سلة') +
+      prodStat(d.H) +
       stat('صافي المبيعات', num(Math.round(netSales / 100)), 'ر.س', 'الإجمالي ' + riyal(grossSales)) +
       stat('المصروفات', num(Math.round(exp / 100)), 'ر.س') +
       stat(profit >= 0 ? 'الربح التقديري' : 'الخسارة التقديرية', num(Math.abs(Math.round(profit / 100))), 'ر.س', '', profit < 0) +
     '</div>' +
     '<div class="analysis-grid">' +
-      '<div class="chart-card"><h2>إنتاج آخر 7 أيام</h2>' +
+      '<div class="chart-card"><h2>العبوات المقطوفة — آخر 7 أيام</h2>' +
+        '<p class="password-hint" style="margin:-6px 0 10px!important">مجموع العبوات بكل أنواعها · ' +
+          esc(byUnitText(d.H.filter(function (r) { return days.indexOf(dayOf(r.date)) > -1; }), baskOf)) + '</p>' +
         (totalB ? '<div class="bars2">' + perDay.map(function (x) {
           return '<div><b>' + (x.v ? num(x.v) : '') + '</b><i style="height:' + Math.round((x.v / maxV) * 100) + '%"></i><span>' + esc(dtShort(x.day)) + '</span></div>';
         }).join('') + '</div>' : '<p class="empty-state">سيظهر الرسم بعد تسجيل جولات القطاف.</p>') +
@@ -1305,7 +1463,7 @@ function tabOverview() {
       FARM_NAMES.map(function (f) {
         var fn = sumBy(d.Sa, 'net', function (r) { return r.farm === f; });
         var fe = expenseOfFarm(f);
-        return '<div class="sum-line"><span>مزرعة ' + esc(f) + ' · ' + num(sumBy(d.H, 'baskets', function (r) { return r.farm === f; })) + ' سلة</span>' +
+        return '<div class="sum-line"><span>مزرعة ' + esc(f) + ' · ' + byUnitText(d.H.filter(function (r) { return r.farm === f; }), baskOf) + '</span>' +
           '<span>مبيعات ' + riyal(fn) + ' — مصروفات ' + riyal(fe) + ' = <b>' + riyal(fn - fe) + '</b></span></div>';
       }).join('') + '</div>';
 }
@@ -1313,12 +1471,12 @@ function tabOverview() {
 function tabHarvests() {
   var rows = S.db.harvests.slice().sort(byDateDesc);
   return '<div class="chart-card">' +
-    '<div class="sum-line total"><span>إجمالي الإنتاج</span><span>' + num(sumBy(D().H, 'baskets')) + ' سلة</span></div>' +
-    (rows.length ? '<div class="tablewrap"><table class="data"><thead><tr><th>التاريخ</th><th>الوقت</th><th>المزرعة</th><th>رقم التشغيلة</th><th>السلال</th><th>المستخدم</th><th>الصورة</th><th></th></tr></thead><tbody>' +
+    '<div class="sum-line total"><span>إجمالي الإنتاج</span><span>' + byUnitText(D().H, baskOf) + '</span></div>' +
+    (rows.length ? '<div class="tablewrap"><table class="data"><thead><tr><th>التاريخ</th><th>الوقت</th><th>المزرعة</th><th>رقم التشغيلة</th><th>الكمية</th><th>النوع</th><th>المستخدم</th><th>الصورة</th><th></th></tr></thead><tbody>' +
       rows.map(function (r) {
         return '<tr class="' + (isVoid(r) ? 'void' : '') + '"><td>' + esc(dtShort(r.date)) + '</td><td>' + esc(tm(r.date)) + '</td>' +
           '<td>' + esc(r.farm) + '</td><td>' + esc(r.batch) + '</td><td><b>' + num(r.baskets) + '</b></td>' +
-          '<td>' + esc(r.userName) + '</td>' +
+          '<td>' + esc(unitOf(r)) + '</td><td>' + esc(r.userName) + '</td>' +
           '<td>' + (r.photo ? '<button class="mini" data-act="img" data-id="' + esc(r.photo) + '">عرض</button>' : '—') + '</td>' +
           '<td>' + rowAction(r, 'Harvests') + '</td></tr>';
       }).join('') + '</tbody></table></div>' : '<p class="empty-state">لا توجد جولات قطاف.</p>') + '</div>';
@@ -1331,14 +1489,14 @@ function tabSales() {
     '<div class="sum-line"><span>إجمالي البيع</span><span>' + riyal(sumBy(d.Sa, 'gross')) + '</span></div>' +
     '<div class="sum-line"><span>العمولات والنقل</span><span>−' + riyal(sumBy(d.Sa, 'commission') + sumBy(d.Sa, 'transport')) + '</span></div>' +
     '<div class="sum-line total"><span>صافي المبيعات</span><span>' + riyal(sumBy(d.Sa, 'net')) + '</span></div>' +
-    (rows.length ? '<div class="tablewrap"><table class="data"><thead><tr><th>التاريخ</th><th>المزرعة</th><th>السلال</th><th>الإجمالي</th><th>عمولة</th><th>نقل</th><th>الصافي</th><th>النوع</th><th>العميل</th><th>الحالة</th><th></th></tr></thead><tbody>' +
+    (rows.length ? '<div class="tablewrap"><table class="data"><thead><tr><th>التاريخ</th><th>المزرعة</th><th>الكمية</th><th>النوع</th><th>الإجمالي</th><th>عمولة</th><th>نقل</th><th>الصافي</th><th>النوع</th><th>العميل</th><th>الحالة</th><th></th></tr></thead><tbody>' +
       rows.map(function (r) {
         var paid = paidFor(r.id), left = (Number(r.net) || 0) - paid;
         var status = r.ptype === 'cash' ? '<span class="tag">نقدي</span>'
           : left <= 0 ? '<span class="tag">مسدَّد</span>'
           : '<span class="tag red">متبقي ' + riyal(left) + '</span>';
         return '<tr class="' + (isVoid(r) ? 'void' : '') + '"><td>' + esc(dtShort(r.date)) + '</td><td>' + esc(r.farm) + '</td>' +
-          '<td>' + num(r.baskets) + '</td><td>' + riyal(r.gross) + '</td><td>' + riyal(r.commission) + '</td>' +
+          '<td>' + num(r.baskets) + '</td><td>' + esc(unitOf(r)) + '</td><td>' + riyal(r.gross) + '</td><td>' + riyal(r.commission) + '</td>' +
           '<td>' + riyal(r.transport) + '</td><td><b>' + riyal(r.net) + '</b></td>' +
           '<td>' + (r.ptype === 'cash' ? 'نقدي' : 'آجل') + '</td><td>' + esc(r.customer || '—') + '</td>' +
           '<td>' + (isVoid(r) ? '<span class="tag grey">ملغاة</span>' : status) + '</td>' +
@@ -1397,7 +1555,19 @@ function tabUsers() {
 }
 
 function tabTools() {
-  return '<div class="chart-card"><h2>رموز بوابات المزارع</h2>' +
+  return '<div class="chart-card"><h2>أنواع التعبئة</h2>' +
+    '<p class="password-hint" style="margin:0 0 14px!important">الأنواع المستخدمة في القطاف والبيع والتعبئة. حذف نوع لا يمس السجلات القديمة، لكنه يمنع استخدامه في عمليات جديدة.</p>' +
+    S.units.map(function (u, i) {
+      var used = totalStock(u);
+      return '<div class="unitrow"><b>' + esc(u) + '</b>' +
+        '<span class="tag' + (used ? '' : ' grey') + '">' + num(used) + ' في المخزون</span>' +
+        (S.units.length > 1
+          ? '<button class="mini danger" data-act="delUnit" data-i="' + i + '">حذف</button>'
+          : '<span class="tag grey">الأخير</span>') + '</div>';
+    }).join('') +
+    '<button class="addbtn" data-act="addUnit">+ إضافة نوع تعبئة</button>' +
+  '</div>' +
+  '<div class="chart-card" style="margin-top:15px"><h2>رموز بوابات المزارع</h2>' +
     '<p class="password-hint" style="margin:0 0 16px!important">اطبع رمز كل مزرعة وثبّته عند البوابة. مسحه أثناء تسجيل القطاف يثبت الحضور الفعلي في الموقع — أقوى من الموقع الجغرافي لأنه لا يمكن تزويره من مكان آخر.</p>' +
     FARM_NAMES.map(function (f) {
       return '<div class="userrow"><div><b>مزرعة ' + esc(f) + '</b>' +
@@ -1446,6 +1616,8 @@ function bind() {
   });
   var sf = document.getElementById('sFarm');
   if (sf) sf.onchange = function () { S.farm = sf.value; render(); };
+  var kf = document.getElementById('kFarm');
+  if (kf) kf.onchange = function () { S.farm = kf.value; render(); };
   [].forEach.call(document.querySelectorAll('[data-act="lf"]'), function (el) {
     el.onchange = function () { S[el.getAttribute('data-k')] = el.value; render(); };
   });
@@ -1514,13 +1686,41 @@ document.addEventListener('click', function (e) {
   if (a === 'add10') return setBaskets((S.baskets || 0) + 10);
   if (a === 'clr') return setBaskets(0);
   if (a === 'pay') { S.ptype = el.getAttribute('data-p'); render(); return; }
-  if (a === 'allStock') { var i = document.getElementById('sBk'); if (i) { i.value = stockOf(S.farm); updateCalc(); } return; }
+  if (a === 'allStock') { var i = document.getElementById('sBk'); if (i) { i.value = stockOf(S.farm, S.unit || S.units[0]); updateCalc(); } return; }
+  if (a === 'unit') { S.unit = el.getAttribute('data-u'); render(); return; }
+  if (a === 'punit') {
+    var pk = el.getAttribute('data-k'), pv = el.getAttribute('data-u');
+    S[pk] = pv;
+    /* لو تطابق النوعان نُزحزح الطرف الآخر تلقائيًا بدل ترك الزر معطّلًا */
+    var other = pk === 'pkFrom' ? 'pkTo' : 'pkFrom';
+    var cur = S[other] || (other === 'pkFrom' ? S.units[0] : (S.units[1] || S.units[0]));
+    if (cur === pv) {
+      var alt = S.units.filter(function (x) { return x !== pv; })[0];
+      S[other] = alt || cur;
+    }
+    render(); return;
+  }
   if (a === 'saveHarvest') return saveHarvest(el);
   if (a === 'saveSale') return saveSale(el);
   if (a === 'saveExpense') return saveExpense(el);
+  if (a === 'savePack') return savePack(el);
   if (a === 'payFor') return payModal(el.getAttribute('data-id'));
   if (a === 'img') return showImage(el.getAttribute('data-id'));
   if (a === 'void') return voidModal(el.getAttribute('data-t'), el.getAttribute('data-id'));
+  if (a === 'addUnit') return unitModal();
+  if (a === 'delUnit') {
+    var ix = Number(el.getAttribute('data-i'));
+    var nm = S.units[ix];
+    confirmBox('حذف نوع التعبئة', 'سيُمنع استخدام «' + nm + '» في العمليات الجديدة. السجلات القديمة تبقى كما هي.',
+      'حذف', true, function () {
+        var b = this; b.disabled = true;
+        var next = S.units.filter(function (x, i) { return i !== ix; });
+        call('setunits', { units: next })
+          .then(function (d) { S.units = d.units; closeModal(); render(); toast('تم الحذف', 'good'); })
+          .catch(function (e) { b.disabled = false; toast(e.message, 'bad'); });
+      });
+    return;
+  }
   if (a === 'newUser') return userModal();
   if (a === 'chpass') return passModal(el.getAttribute('data-id'), el.getAttribute('data-name'));
   if (a === 'chmail') return mailModal(el.getAttribute('data-id'), el.getAttribute('data-name'), el.getAttribute('data-email'));
@@ -1536,7 +1736,7 @@ function resetForm() {
   camStop();
   S.photo = null; S.photoSource = ''; S.photoAt = ''; S.photoGeo = null;
   S.aiBaskets = ''; S.aiQuality = ''; S.aiNotes = ''; S.aiBusy = false; S.gate = '';
-  S.baskets = 0; S.ptype = 'cash';
+  S.baskets = 0; S.ptype = 'cash'; S.pkFrom = ''; S.pkTo = '';
 }
 
 /* البيانات التوثيقية المرفقة مع كل عملية */
@@ -1599,7 +1799,7 @@ function saveHarvest(btn) {
   if (!S.photo) return toast('التقط صورة المحصول أولًا', 'bad');
   if (!(S.baskets > 0)) return toast('أدخل عدد السلال', 'bad');
   guard(btn, 'حفظ جولة القطاف', submitOp('Harvests',
-    mix({ farm: S.farm, code: FARMS[S.farm].code, baskets: S.baskets,
+    mix({ farm: S.farm, code: FARMS[S.farm].code, baskets: S.baskets, unit: (S.unit || S.units[0]),
           aiBaskets: S.aiBaskets, aiQuality: S.aiQuality, aiNotes: S.aiNotes, gate: S.gate }),
     S.photo
   ).then(function (d) {
@@ -1613,10 +1813,12 @@ function saveSale(btn) {
   var comm = Math.round(numOf(val('sComm')) * 100);
   var tr = Math.round(numOf(val('sTrans')) * 100);
   if (!(bk > 0)) return toast('أدخل عدد السلال', 'bad');
-  if (bk > stockOf(S.farm)) return toast('المخزون المتاح ' + num(stockOf(S.farm)) + ' سلة فقط', 'bad');
+  var sUnit = S.unit || S.units[0];
+  var avail = stockOf(S.farm, sUnit);
+  if (bk > avail) return toast('المتاح ' + num(avail) + ' ' + sUnit + ' فقط', 'bad');
   if (!(gross > 0)) return toast('أدخل إجمالي البيع', 'bad');
   if (gross - comm - tr < 0) return toast('العمولة والنقل أكبر من إجمالي البيع', 'bad');
-  var rec = mix({ farm: S.farm, baskets: bk, gross: gross, commission: comm, transport: tr, ptype: S.ptype || 'cash' });
+  var rec = mix({ farm: S.farm, baskets: bk, unit: sUnit, gross: gross, commission: comm, transport: tr, ptype: S.ptype || 'cash' });
   if (rec.ptype === 'credit') {
     rec.customer = (val('sCust') || '').trim();
     rec.due = val('sDue');
@@ -1699,6 +1901,21 @@ function showImage(id) {
   });
 }
 
+function unitModal() {
+  modal('<h3>نوع تعبئة جديد</h3><p>مثل: صندوق · بوكس · سلة · كرتون</p>' +
+    '<label>الاسم<input id="unName" placeholder="اسم النوع"></label>' +
+    '<div class="modal-actions"><button data-act="closeModal">إلغاء</button><button class="go" id="unGo">إضافة</button></div>');
+  document.getElementById('unGo').onclick = function () {
+    var v = (val('unName') || '').trim();
+    if (!v) return toast('اكتب اسم النوع', 'bad');
+    if (S.units.indexOf(v) >= 0) return toast('هذا النوع موجود', 'bad');
+    var b = this; b.disabled = true; b.textContent = 'جارٍ…';
+    call('setunits', { units: S.units.concat([v]) })
+      .then(function (d) { S.units = d.units; closeModal(); render(); toast('تمت الإضافة', 'good'); })
+      .catch(function (e) { b.disabled = false; b.textContent = 'إضافة'; toast(e.message, 'bad'); });
+  };
+}
+
 function userModal() {
   modal('<h3>مستخدم جديد</h3><p>سيتمكن من الدخول برقم جواله وكلمة المرور</p>' +
     '<label>الاسم<input id="uName" required></label>' +
@@ -1772,7 +1989,8 @@ function refresh() {
   return call('all', {}).then(function (d) {
     S.user = d.user;
     S.db = { harvests: d.harvests || [], sales: d.sales || [], expenses: d.expenses || [],
-             payments: d.payments || [], users: d.users || [] };
+             payments: d.payments || [], packing: d.packing || [], users: d.users || [] };
+    if (d.units && d.units.length) S.units = d.units;
     idbPut('cache', { key: 'db', user: d.user, db: S.db, at: new Date().toISOString() });
     return d;
   });
@@ -1837,6 +2055,13 @@ function askStatus() {
   return call('status', {})
     .then(function (d) { S.authMode = d.needsSetup ? 'setup' : 'login'; render(); })
     .catch(function (x) { S.authMode = 'login'; render(); if (!x.offline) toast(x.message, 'bad'); });
+}
+
+/* منفذ اختبار محلي فقط — لا يعمل على النطاق المنشور */
+if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
+  window.__t = { S: S, call: call, submitOp: submitOp, mix: mix, stockOf: stockOf,
+                 stockSummary: stockSummary, activeUnits: activeUnits, render: render, FARMS: FARMS,
+                 refresh: refresh, stockLine: stockLine, partnerBook: partnerBook };
 }
 
 boot();

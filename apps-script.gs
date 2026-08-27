@@ -5,10 +5,11 @@ var PHOTOS = 'almazraatain-photos';
 var COLS = {
   Users: ['id','phone','name','role','hash','active','created','email'],
   Sessions: ['token','userId','expires'],
-  Harvests: ['id','date','capturedAt','farm','baskets','batch','photo','lat','lng','device','gate','aiBaskets','aiQuality','aiNotes','userId','userName','void','voidReason','opId'],
-  Sales: ['id','date','capturedAt','farm','baskets','gross','commission','transport','net','ptype','customer','due','lat','lng','device','userId','userName','void','voidReason','opId'],
+  Harvests: ['id','date','capturedAt','farm','baskets','batch','photo','lat','lng','device','gate','aiBaskets','aiQuality','aiNotes','unit','userId','userName','void','voidReason','opId'],
+  Sales: ['id','date','capturedAt','farm','baskets','gross','commission','transport','net','ptype','customer','due','lat','lng','device','unit','userId','userName','void','voidReason','opId'],
   Expenses: ['id','date','capturedAt','category','amount','farm','payer','notes','photo','lat','lng','device','userId','userName','void','voidReason','opId'],
   Payments: ['id','date','saleId','amount','method','userId','userName','void','voidReason','opId'],
+  Packing: ['id','date','farm','fromUnit','fromQty','toUnit','toQty','notes','userId','userName','void','voidReason','opId'],
   Log: ['date','userName','action','detail']
 };
 
@@ -31,6 +32,7 @@ function doPost(e) {
     if (b.a === 'void') return j(voidRow(b, u));
     if (b.a === 'img') return j(img(b));
     if (b.a === 'ai') return j(aiRun(b, u));
+    if (b.a === 'setunits') return j(setUnits(b, u));
     if (b.a === 'adduser') return j(addUser(b, u));
     if (b.a === 'setuser') return j(setUser(b, u));
     if (b.a === 'logout') return j(logout(b));
@@ -44,7 +46,7 @@ function j(o) {
 
 /* الأعمدة الرقمية والمنطقية تبقى بصيغتها، وكل ما عداها يُجبر كنص صريح
    حتى لا تحوّل Sheets رقم الجوال (+966...) لمعادلة أو التواريخ لصيغة أخرى. */
-var NUMCOLS = ['baskets','gross','commission','transport','net','amount','lat','lng','aiBaskets','aiQuality'];
+var NUMCOLS = ['baskets','gross','commission','transport','net','amount','lat','lng','aiBaskets','aiQuality','fromQty','toQty'];
 var BOOLCOLS = ['active','void'];
 
 function sh(n) {
@@ -323,6 +325,8 @@ function all(u) {
     sales: rows('Sales'),
     expenses: rows('Expenses'),
     payments: rows('Payments'),
+    packing: rows('Packing'),
+    units: getUnits(),
     users: u.role === 'admin' ? clean(rows('Users')) : []
   };
 }
@@ -345,12 +349,23 @@ function img(b) {
   } catch (x) { return { error: 'NO_IMG' }; }
 }
 
-function stock(farm) {
+function stock(farm, unit) {
   var total = 0, i;
   var hs = rows('Harvests');
-  for (i = 0; i < hs.length; i++) if (hs[i].farm === farm && hs[i]['void'] !== true) total += Number(hs[i].baskets);
+  for (i = 0; i < hs.length; i++) {
+    if (hs[i].farm === farm && unitOf(hs[i]) === unit && hs[i]['void'] !== true) total += Number(hs[i].baskets) || 0;
+  }
   var ss = rows('Sales');
-  for (i = 0; i < ss.length; i++) if (ss[i].farm === farm && ss[i]['void'] !== true) total -= Number(ss[i].baskets);
+  for (i = 0; i < ss.length; i++) {
+    if (ss[i].farm === farm && unitOf(ss[i]) === unit && ss[i]['void'] !== true) total -= Number(ss[i].baskets) || 0;
+  }
+  /* التعبئة تنقص من النوع المصدر وتزيد النوع الناتج */
+  var pk = rows('Packing');
+  for (i = 0; i < pk.length; i++) {
+    if (pk[i].farm !== farm || pk[i]['void'] === true) continue;
+    if (String(pk[i].fromUnit) === unit) total -= Number(pk[i].fromQty) || 0;
+    if (String(pk[i].toUnit) === unit) total += Number(pk[i].toQty) || 0;
+  }
   return total;
 }
 
@@ -390,8 +405,10 @@ function add(b, u) {
     if (t === 'Harvests') {
       if (!(Number(r.baskets) > 0)) return { error: 'BAD_BASKETS' };
       if (!b.img) return { error: 'NEED_PHOTO' };
+      var hUnit = String(r.unit || '').trim();
+      if (!hUnit || getUnits().indexOf(hUnit) < 0) return { error: 'BAD_UNIT' };
       var batch = batchNo(r.farm, r.code);
-      append('Harvests', { id: id, opId: (r.opId || ''), date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
+      append('Harvests', { id: id, opId: (r.opId || ''), unit: hUnit, date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
         baskets: Number(r.baskets), batch: batch, photo: upload(b.img, id),
         lat: r.lat || '', lng: r.lng || '', device: r.device || '', gate: r.gate || '',
         aiBaskets: r.aiBaskets === undefined || r.aiBaskets === '' ? '' : Number(r.aiBaskets),
@@ -404,11 +421,13 @@ function add(b, u) {
     if (t === 'Sales') {
       var n = Number(r.baskets);
       if (!(n > 0)) return { error: 'BAD_BASKETS' };
-      if (n > stock(r.farm)) return { error: 'NO_STOCK' };
+      var sUnit = String(r.unit || '').trim();
+      if (!sUnit || getUnits().indexOf(sUnit) < 0) return { error: 'BAD_UNIT' };
+      if (n > stock(r.farm, sUnit)) return { error: 'NO_STOCK' };
       var net = Number(r.gross) - Number(r.commission || 0) - Number(r.transport || 0);
       if (net < 0) return { error: 'NEG_NET' };
       if (r.ptype === 'credit' && (!r.customer || !r.due)) return { error: 'NEED_CUSTOMER' };
-      append('Sales', { id: id, opId: (r.opId || ''), date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
+      append('Sales', { id: id, opId: (r.opId || ''), unit: sUnit, date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
         baskets: n, gross: Number(r.gross),
         commission: Number(r.commission || 0), transport: Number(r.transport || 0), net: net,
         ptype: r.ptype, customer: r.customer || '', due: r.due || '',
@@ -425,6 +444,20 @@ function add(b, u) {
         photo: upload(b.img, id), lat: r.lat || '', lng: r.lng || '', device: r.device || '',
         userId: u.id, userName: u.name, 'void': false, voidReason: '' });
       log(u, 'expense', r.category + ' / ' + r.amount);
+      return { ok: 1, id: id };
+    }
+    if (t === 'Packing') {
+      var fq = Number(r.fromQty), tq = Number(r.toQty);
+      var fu = String(r.fromUnit || '').trim(), tu = String(r.toUnit || '').trim();
+      var units = getUnits();
+      if (units.indexOf(fu) < 0 || units.indexOf(tu) < 0) return { error: 'BAD_UNIT' };
+      if (fu === tu) return { error: 'SAME_UNIT' };
+      if (!(fq > 0) || !(tq > 0)) return { error: 'BAD_QTY' };
+      if (fq > stock(r.farm, fu)) return { error: 'NO_STOCK' };
+      append('Packing', { id: id, opId: (r.opId || ''), date: now(), farm: r.farm,
+        fromUnit: fu, fromQty: fq, toUnit: tu, toQty: tq, notes: r.notes || '',
+        userId: u.id, userName: u.name, 'void': false, voidReason: '' });
+      log(u, 'packing', fq + ' ' + fu + ' -> ' + tq + ' ' + tu);
       return { ok: 1, id: id };
     }
     if (t === 'Payments') {
@@ -444,7 +477,8 @@ function voidRow(b, u) {
   if (col === 0) return { error: 'BAD_TABLE' };
   for (var i = 0; i < list.length; i++) {
     if (list[i].id === b.id) {
-      if (t === 'Harvests' && stock(list[i].farm) - Number(list[i].baskets) < 0) return { error: 'STOCK_LOCK' };
+      if (t === 'Harvests' && stock(list[i].farm, unitOf(list[i])) - Number(list[i].baskets) < 0) return { error: 'STOCK_LOCK' };
+      if (t === 'Packing' && stock(list[i].farm, String(list[i].toUnit)) - Number(list[i].toQty) < 0) return { error: 'STOCK_LOCK' };
       s.getRange(list[i]._row, col).setValue(true);
       s.getRange(list[i]._row, col + 1).setValue(b.reason || '');
       log(u, 'void', t + ' / ' + b.id + ' / ' + (b.reason || ''));
@@ -474,6 +508,36 @@ function addUser(b, u) {
 /* ═══════════ الذكاء الاصطناعي (Gemini) ═══════════
    المفتاح يُحفظ في Project Settings > Script Properties باسم GEMINI_KEY
    ولا يُكتب داخل الكود إطلاقًا. */
+
+/* ═══════════ أنواع التعبئة ═══════════
+   قابلة للتعديل من لوحة الإدارة — لا تُثبَّت في الكود
+   حتى لا يحتاج تغييرها إعادة نشر. */
+var DEFAULT_UNITS = ['صندوق', 'بوكس', 'سلة'];
+
+function getUnits() {
+  var raw = PropertiesService.getScriptProperties().getProperty('UNITS');
+  if (raw) { try { var a = JSON.parse(raw); if (a && a.length) return a; } catch (x) {} }
+  return DEFAULT_UNITS;
+}
+
+function setUnits(b, u) {
+  if (u.role !== 'admin') return { error: 'NOT_ADMIN' };
+  var list = [];
+  for (var i = 0; i < (b.units || []).length; i++) {
+    var v = String(b.units[i] || '').trim();
+    if (v && list.indexOf(v) < 0) list.push(v);
+  }
+  if (!list.length) return { error: 'NO_UNITS' };
+  PropertiesService.getScriptProperties().setProperty('UNITS', JSON.stringify(list));
+  log(u, 'units', list.join(' · '));
+  return { ok: 1, units: list };
+}
+
+/* الوحدة الافتراضية للسجلات القديمة التي سُجّلت قبل إضافة الأنواع */
+function unitOf(r) {
+  var v = String(r.unit === undefined || r.unit === null ? '' : r.unit).trim();
+  return v || 'سلة';
+}
 
 function gKey() { return PropertiesService.getScriptProperties().getProperty('GEMINI_KEY'); }
 
