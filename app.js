@@ -3,7 +3,17 @@
 'use strict';
 
 /* ═══════════ الإعدادات ═══════════ */
-var API_DEFAULT = 'https://script.google.com/macros/s/AKfycbyeo8MgfiwUHkC5nyKdOqRcsRQlmL-TA_77Tp2qNyQh3PE9IgVZoVlUiXGMU8FRBdnpSA/exec';
+var API_DEFAULT = 'https://script.google.com/macros/s/AKfycbwaKs32n8A10VklC1XILzdrM0mZPOl2zi5KAuAa96NeNy2kD07aK5Z7WUuk1cRt5_1nKg/exec';
+
+/* رابط النشر يتبدّل مع كل نشر جديد. أي جهاز حفظ الرابط القديم محليًا
+   يبقى يخاطب نشرًا ميتًا للأبد، فنُسقط المحفوظ كلما تغيّر الرابط المدمج. */
+try {
+  if (localStorage.getItem('mzr_api_seed') !== API_DEFAULT) {
+    localStorage.removeItem('mzr_api');
+    localStorage.setItem('mzr_api_seed', API_DEFAULT);
+  }
+} catch (e) {}
+
 var API = localStorage.getItem('mzr_api') || API_DEFAULT;
 var KEY = 'mzr-key-2026-almazraatain';
 
