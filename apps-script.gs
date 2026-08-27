@@ -37,7 +37,7 @@ function doPost(e) {
     if (b.a === 'setunits') return j(setUnits(b, u));
     if (b.a === 'adduser') return j(addUser(b, u));
     if (b.a === 'setuser') return j(setUser(b, u));
-    if (b.a === 'logout') return j(logout(b));
+    if (b.a === 'logout') return j(logout(b, u));
     return j({ error: 'BAD_ACTION' });
   } catch (err) { return j({ error: 'ERR', detail: String(err) }); }
 }
@@ -186,12 +186,22 @@ function auth(token) {
   return null;
 }
 
-function logout(b) {
+function logout(b, u) {
   var s = sh('Sessions'), ss = rows('Sessions');
   for (var i = ss.length - 1; i >= 0; i--) if (ss[i].token === b.t) s.deleteRow(ss[i]._row);
   dirty('Sessions');
+  log(u, 'logout', '');
   return { ok: 1 };
 }
+
+/* لا نكتب المعرّف كاملًا في السجل: قد يُدخل المستخدم كلمة المرور في خانة البريد سهوًا */
+function mask(v) {
+  var t = String(v || '').trim();
+  if (t.length <= 4) return t ? t.charAt(0) + '***' : '-';
+  return t.substring(0, 3) + '***' + t.substring(t.length - 2);
+}
+
+function roleName(r) { return r === 'admin' ? 'المدير' : r === 'operator' ? 'مشغّل' : 'مطّلع'; }
 
 function log(user, action, detail) {
   append('Log', { date: now(), userName: user ? user.name : '-', action: action, detail: detail });
@@ -287,7 +297,10 @@ function login(b) {
   var p = props.getProperty(key);
   var rec = p ? JSON.parse(p) : { n: 0, at: 0 };
   var mins = (Date.now() - rec.at) / 60000;
-  if (rec.n >= MAX_TRIES && mins < LOCK_MIN) return { error: 'LOCKED' };
+  if (rec.n >= MAX_TRIES && mins < LOCK_MIN) {
+    log(null, 'login-locked', mask(raw));
+    return { error: 'LOCKED' };
+  }
   if (mins >= LOCK_MIN) props.deleteProperty(key);
 
   var us = rows('Users');
@@ -300,12 +313,14 @@ function login(b) {
       var parts = String(u.hash).split('$');
       if (hash(b.pass, parts[0]) === parts[1]) {
         props.deleteProperty(key);
+        log(u, 'login', (byEmail ? 'بريد' : 'جوال') + ' · ' + roleName(u.role));
         return { ok: 1, t: mkToken(u.id), user: { id: u.id, name: u.name, role: u.role } };
       }
     }
   }
   rec.n++; rec.at = Date.now();
   props.setProperty(key, JSON.stringify(rec));
+  log(null, 'login-failed', mask(raw) + ' · محاولة ' + rec.n + ' من ' + MAX_TRIES);
   return { error: 'BAD_LOGIN' };
 }
 

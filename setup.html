@@ -60,7 +60,7 @@ pre{background:#12211c;color:#dfe9e4;padding:18px;border-radius:14px;overflow:au
 
 <div class="copybar">
 <button class="copybtn" id="cp">نسخ الكود كاملًا</button>
-<span class="meta">818 سطرًا · 34.8 ك.ب</span>
+<span class="meta">833 سطرًا · 35.5 ك.ب</span>
 </div>
 <pre id="code">var K = &#x27;mzr-key-2026-almazraatain&#x27;;
 var SS = SpreadsheetApp.getActive();
@@ -101,7 +101,7 @@ function doPost(e) {
     if (b.a === &#x27;setunits&#x27;) return j(setUnits(b, u));
     if (b.a === &#x27;adduser&#x27;) return j(addUser(b, u));
     if (b.a === &#x27;setuser&#x27;) return j(setUser(b, u));
-    if (b.a === &#x27;logout&#x27;) return j(logout(b));
+    if (b.a === &#x27;logout&#x27;) return j(logout(b, u));
     return j({ error: &#x27;BAD_ACTION&#x27; });
   } catch (err) { return j({ error: &#x27;ERR&#x27;, detail: String(err) }); }
 }
@@ -250,12 +250,22 @@ function auth(token) {
   return null;
 }
 
-function logout(b) {
+function logout(b, u) {
   var s = sh(&#x27;Sessions&#x27;), ss = rows(&#x27;Sessions&#x27;);
   for (var i = ss.length - 1; i &gt;= 0; i--) if (ss[i].token === b.t) s.deleteRow(ss[i]._row);
   dirty(&#x27;Sessions&#x27;);
+  log(u, &#x27;logout&#x27;, &#x27;&#x27;);
   return { ok: 1 };
 }
+
+/* لا نكتب المعرّف كاملًا في السجل: قد يُدخل المستخدم كلمة المرور في خانة البريد سهوًا */
+function mask(v) {
+  var t = String(v || &#x27;&#x27;).trim();
+  if (t.length &lt;= 4) return t ? t.charAt(0) + &#x27;***&#x27; : &#x27;-&#x27;;
+  return t.substring(0, 3) + &#x27;***&#x27; + t.substring(t.length - 2);
+}
+
+function roleName(r) { return r === &#x27;admin&#x27; ? &#x27;المدير&#x27; : r === &#x27;operator&#x27; ? &#x27;مشغّل&#x27; : &#x27;مطّلع&#x27;; }
 
 function log(user, action, detail) {
   append(&#x27;Log&#x27;, { date: now(), userName: user ? user.name : &#x27;-&#x27;, action: action, detail: detail });
@@ -351,7 +361,10 @@ function login(b) {
   var p = props.getProperty(key);
   var rec = p ? JSON.parse(p) : { n: 0, at: 0 };
   var mins = (Date.now() - rec.at) / 60000;
-  if (rec.n &gt;= MAX_TRIES &amp;&amp; mins &lt; LOCK_MIN) return { error: &#x27;LOCKED&#x27; };
+  if (rec.n &gt;= MAX_TRIES &amp;&amp; mins &lt; LOCK_MIN) {
+    log(null, &#x27;login-locked&#x27;, mask(raw));
+    return { error: &#x27;LOCKED&#x27; };
+  }
   if (mins &gt;= LOCK_MIN) props.deleteProperty(key);
 
   var us = rows(&#x27;Users&#x27;);
@@ -364,12 +377,14 @@ function login(b) {
       var parts = String(u.hash).split(&#x27;$&#x27;);
       if (hash(b.pass, parts[0]) === parts[1]) {
         props.deleteProperty(key);
+        log(u, &#x27;login&#x27;, (byEmail ? &#x27;بريد&#x27; : &#x27;جوال&#x27;) + &#x27; · &#x27; + roleName(u.role));
         return { ok: 1, t: mkToken(u.id), user: { id: u.id, name: u.name, role: u.role } };
       }
     }
   }
   rec.n++; rec.at = Date.now();
   props.setProperty(key, JSON.stringify(rec));
+  log(null, &#x27;login-failed&#x27;, mask(raw) + &#x27; · محاولة &#x27; + rec.n + &#x27; من &#x27; + MAX_TRIES);
   return { error: &#x27;BAD_LOGIN&#x27; };
 }
 
