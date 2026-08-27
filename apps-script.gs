@@ -1,3 +1,7 @@
+/* ارفع هذا الرقم مع كل تعديل. يظهر في التطبيق وفي doGet،
+   فيُعرف أي نسخة منشورة فعلًا دون الحاجة لتسجيل الدخول. */
+var SRV = 20260827;
+
 var K = 'mzr-key-2026-almazraatain';
 var SS = SpreadsheetApp.getActive();
 var PHOTOS = 'almazraatain-photos';
@@ -12,17 +16,27 @@ var COLS = {
   Expenses: ['id','date','capturedAt','category','amount','farm','payer','notes','photo','lat','lng','device','userId','userName','void','voidReason','opId'],
   Payments: ['id','date','saleId','amount','method','userId','userName','void','voidReason','opId'],
   Packing: ['id','date','farm','fromUnit','fromQty','toUnit','toQty','notes','userId','userName','void','voidReason','opId'],
-  Log: ['date','userName','action','detail']
+  Log: ['date','userName','action','detail'],
+  /* ورقة مستقلة بعناوين عربية ليقرأها صاحب المزرعة من الجدول مباشرة */
+  'سجل الدخول': ['التاريخ', 'الوقت', 'المستخدم', 'الحدث', 'التفاصيل']
 };
 
-function doGet(e) { return j({ ok: 1, api: 'almazraatain' }); }
+var ACCESS_SHEET = 'سجل الدخول';
+var EVENT_AR = {
+  login: 'دخول',
+  logout: 'خروج',
+  'login-failed': 'محاولة فاشلة',
+  'login-locked': 'قفل بعد تكرار المحاولات'
+};
+
+function doGet(e) { return j({ ok: 1, api: 'almazraatain', srv: SRV }); }
 
 function doPost(e) {
   var b;
   try { b = JSON.parse(e.postData.contents); } catch (x) { return j({ error: 'BAD_JSON' }); }
   if (b.k !== K) return j({ error: 'BAD_KEY' });
   try {
-    if (b.a === 'status') return j({ needsSetup: rows('Users').length === 0 });
+    if (b.a === 'status') return j({ needsSetup: rows('Users').length === 0, srv: SRV });
     if (b.a === 'setup') return j(setup(b));
     if (b.a === 'login') return j(login(b));
     if (b.a === 'forgot') return j(forgot(b));
@@ -205,6 +219,22 @@ function roleName(r) { return r === 'admin' ? 'المدير' : r === 'operator' 
 
 function log(user, action, detail) {
   append('Log', { date: now(), userName: user ? user.name : '-', action: action, detail: detail });
+  if (EVENT_AR[action]) accessLog(user, action, detail);
+}
+
+/* حركات الدخول تُكتب أيضًا في ورقتها العربية المستقلة.
+   الفصل مقصود: ورقة Log فيها كل شيء ويصعب تصفّحها،
+   وهذه ورقة واحدة يقرأها المالك بنظرة. */
+function accessLog(user, action, detail) {
+  var d = new Date(Date.now() + 3 * 3600000);   /* توقيت الرياض */
+  var hh = ('0' + d.getUTCHours()).slice(-2), mm = ('0' + d.getUTCMinutes()).slice(-2);
+  var o = {};
+  o[COLS[ACCESS_SHEET][0]] = d.toISOString().substring(0, 10);
+  o[COLS[ACCESS_SHEET][1]] = hh + ':' + mm;
+  o[COLS[ACCESS_SHEET][2]] = user ? user.name : 'غير معروف';
+  o[COLS[ACCESS_SHEET][3]] = EVENT_AR[action];
+  o[COLS[ACCESS_SHEET][4]] = detail || '';
+  append(ACCESS_SHEET, o);
 }
 
 function setup(b) {
@@ -337,6 +367,7 @@ function clean(list) {
 function all(u) {
   return {
     ok: 1,
+    srv: SRV,
     user: { id: u.id, name: u.name, role: u.role },
     harvests: rows('Harvests'),
     sales: rows('Sales'),

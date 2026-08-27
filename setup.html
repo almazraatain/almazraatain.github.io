@@ -60,9 +60,13 @@ pre{background:#12211c;color:#dfe9e4;padding:18px;border-radius:14px;overflow:au
 
 <div class="copybar">
 <button class="copybtn" id="cp">نسخ الكود كاملًا</button>
-<span class="meta">851 سطرًا · 36.3 ك.ب</span>
+<span class="meta">882 سطرًا · 37.8 ك.ب</span>
 </div>
-<pre id="code">var K = &#x27;mzr-key-2026-almazraatain&#x27;;
+<pre id="code">/* ارفع هذا الرقم مع كل تعديل. يظهر في التطبيق وفي doGet،
+   فيُعرف أي نسخة منشورة فعلًا دون الحاجة لتسجيل الدخول. */
+var SRV = 20260827;
+
+var K = &#x27;mzr-key-2026-almazraatain&#x27;;
 var SS = SpreadsheetApp.getActive();
 var PHOTOS = &#x27;almazraatain-photos&#x27;;
 
@@ -76,17 +80,27 @@ var COLS = {
   Expenses: [&#x27;id&#x27;,&#x27;date&#x27;,&#x27;capturedAt&#x27;,&#x27;category&#x27;,&#x27;amount&#x27;,&#x27;farm&#x27;,&#x27;payer&#x27;,&#x27;notes&#x27;,&#x27;photo&#x27;,&#x27;lat&#x27;,&#x27;lng&#x27;,&#x27;device&#x27;,&#x27;userId&#x27;,&#x27;userName&#x27;,&#x27;void&#x27;,&#x27;voidReason&#x27;,&#x27;opId&#x27;],
   Payments: [&#x27;id&#x27;,&#x27;date&#x27;,&#x27;saleId&#x27;,&#x27;amount&#x27;,&#x27;method&#x27;,&#x27;userId&#x27;,&#x27;userName&#x27;,&#x27;void&#x27;,&#x27;voidReason&#x27;,&#x27;opId&#x27;],
   Packing: [&#x27;id&#x27;,&#x27;date&#x27;,&#x27;farm&#x27;,&#x27;fromUnit&#x27;,&#x27;fromQty&#x27;,&#x27;toUnit&#x27;,&#x27;toQty&#x27;,&#x27;notes&#x27;,&#x27;userId&#x27;,&#x27;userName&#x27;,&#x27;void&#x27;,&#x27;voidReason&#x27;,&#x27;opId&#x27;],
-  Log: [&#x27;date&#x27;,&#x27;userName&#x27;,&#x27;action&#x27;,&#x27;detail&#x27;]
+  Log: [&#x27;date&#x27;,&#x27;userName&#x27;,&#x27;action&#x27;,&#x27;detail&#x27;],
+  /* ورقة مستقلة بعناوين عربية ليقرأها صاحب المزرعة من الجدول مباشرة */
+  &#x27;سجل الدخول&#x27;: [&#x27;التاريخ&#x27;, &#x27;الوقت&#x27;, &#x27;المستخدم&#x27;, &#x27;الحدث&#x27;, &#x27;التفاصيل&#x27;]
 };
 
-function doGet(e) { return j({ ok: 1, api: &#x27;almazraatain&#x27; }); }
+var ACCESS_SHEET = &#x27;سجل الدخول&#x27;;
+var EVENT_AR = {
+  login: &#x27;دخول&#x27;,
+  logout: &#x27;خروج&#x27;,
+  &#x27;login-failed&#x27;: &#x27;محاولة فاشلة&#x27;,
+  &#x27;login-locked&#x27;: &#x27;قفل بعد تكرار المحاولات&#x27;
+};
+
+function doGet(e) { return j({ ok: 1, api: &#x27;almazraatain&#x27;, srv: SRV }); }
 
 function doPost(e) {
   var b;
   try { b = JSON.parse(e.postData.contents); } catch (x) { return j({ error: &#x27;BAD_JSON&#x27; }); }
   if (b.k !== K) return j({ error: &#x27;BAD_KEY&#x27; });
   try {
-    if (b.a === &#x27;status&#x27;) return j({ needsSetup: rows(&#x27;Users&#x27;).length === 0 });
+    if (b.a === &#x27;status&#x27;) return j({ needsSetup: rows(&#x27;Users&#x27;).length === 0, srv: SRV });
     if (b.a === &#x27;setup&#x27;) return j(setup(b));
     if (b.a === &#x27;login&#x27;) return j(login(b));
     if (b.a === &#x27;forgot&#x27;) return j(forgot(b));
@@ -269,6 +283,22 @@ function roleName(r) { return r === &#x27;admin&#x27; ? &#x27;المدير&#x27;
 
 function log(user, action, detail) {
   append(&#x27;Log&#x27;, { date: now(), userName: user ? user.name : &#x27;-&#x27;, action: action, detail: detail });
+  if (EVENT_AR[action]) accessLog(user, action, detail);
+}
+
+/* حركات الدخول تُكتب أيضًا في ورقتها العربية المستقلة.
+   الفصل مقصود: ورقة Log فيها كل شيء ويصعب تصفّحها،
+   وهذه ورقة واحدة يقرأها المالك بنظرة. */
+function accessLog(user, action, detail) {
+  var d = new Date(Date.now() + 3 * 3600000);   /* توقيت الرياض */
+  var hh = (&#x27;0&#x27; + d.getUTCHours()).slice(-2), mm = (&#x27;0&#x27; + d.getUTCMinutes()).slice(-2);
+  var o = {};
+  o[COLS[ACCESS_SHEET][0]] = d.toISOString().substring(0, 10);
+  o[COLS[ACCESS_SHEET][1]] = hh + &#x27;:&#x27; + mm;
+  o[COLS[ACCESS_SHEET][2]] = user ? user.name : &#x27;غير معروف&#x27;;
+  o[COLS[ACCESS_SHEET][3]] = EVENT_AR[action];
+  o[COLS[ACCESS_SHEET][4]] = detail || &#x27;&#x27;;
+  append(ACCESS_SHEET, o);
 }
 
 function setup(b) {
@@ -401,6 +431,7 @@ function clean(list) {
 function all(u) {
   return {
     ok: 1,
+    srv: SRV,
     user: { id: u.id, name: u.name, role: u.role },
     harvests: rows(&#x27;Harvests&#x27;),
     sales: rows(&#x27;Sales&#x27;),

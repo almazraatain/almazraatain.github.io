@@ -3,6 +3,19 @@
 'use strict';
 
 /* ═══════════ الإعدادات ═══════════ */
+/* رقم الإصدار يُستخرج من رابط app.js?v=N — لا يُكتب يدويًا فلا يتأخر عن bump.
+   يُقرأ فور التحميل لأن currentScript يصير null بعد انتهاء التنفيذ. */
+function appVer() {
+  var src = (document.currentScript && document.currentScript.src) || '';
+  if (!src) {
+    var ss = document.getElementsByTagName('script');
+    for (var i = 0; i < ss.length; i++) if (/app\.js/.test(ss[i].src)) src = ss[i].src;
+  }
+  var m = String(src).match(/[?&]v=(\d+)/);
+  return m ? m[1] : '?';
+}
+var APP_V = appVer();
+
 var API_DEFAULT = 'https://script.google.com/macros/s/AKfycbx4awKTyV0u6CfF_SmgXxNu50xxbFSpL08PxGgoL_TLqZyXDtnrc8yrAiKBzmAjaXEQdw/exec';
 
 /* رابط النشر يتبدّل مع كل نشر جديد. أي جهاز حفظ الرابط القديم محليًا
@@ -1413,10 +1426,12 @@ function aside(title, items) {
 }
 
 /* ═══════════ لوحة الإدارة ═══════════ */
+/* «من دخل ومتى» في المقدمة عمدًا: الشريط يُمرَّر أفقيًا على الجوال،
+   وما بعد الثالث لا يُرى إلا بتمرير فيظن المستخدم أنه غير موجود. */
 var TABS = [
-  ['overview', 'نظرة عامة'], ['harvests', 'الإنتاج'], ['sales', 'المبيعات'],
-  ['expenses', 'المصروفات'], ['partners', 'الشركاء'], ['users', 'المستخدمون'],
-  ['access', 'من دخل ومتى'], ['tools', 'الرموز والأدوات']
+  ['overview', 'نظرة عامة'], ['access', 'من دخل ومتى'], ['harvests', 'الإنتاج'],
+  ['sales', 'المبيعات'], ['expenses', 'المصروفات'], ['partners', 'الشركاء'],
+  ['users', 'المستخدمون'], ['tools', 'الرموز والأدوات']
 ];
 
 function viewAdmin() {
@@ -1650,6 +1665,10 @@ function tabTools() {
         (S.aiState || '<button class="mini" data-act="aiPing">فحص الاتصال</button>') + '</span></div>' +
     '</div>' +
     '<div class="chart-card" style="margin-top:15px"><h2>التطبيق</h2>' +
+      '<div class="sum-line"><span>إصدار التطبيق على هذا الجهاز</span><span><b>' + esc(APP_V) + '</b></span></div>' +
+      '<div class="sum-line"><span>إصدار كود الخادم</span><span>' +
+        (S.srv ? '<b>' + esc(String(S.srv)) + '</b>'
+               : '<span class="tag red">قديم — لم يُحدَّث بعد</span>') + '</span></div>' +
       '<div class="sum-line"><span>وضع العمل بدون إنترنت</span><span>' +
         ('serviceWorker' in navigator ? 'مفعّل' : 'غير مدعوم في هذا المتصفح') + '</span></div>' +
       '<div class="sum-line"><span>عمليات لم تُرفع</span><span>' + num(S.queue.length) + '</span></div>' +
@@ -2063,6 +2082,7 @@ function refresh() {
              payments: d.payments || [], packing: d.packing || [], users: d.users || [],
              authLog: d.authLog || [] };
     if (d.units && d.units.length) S.units = d.units;
+    S.srv = d.srv || 0;
     idbPut('cache', { key: 'db', user: d.user, db: S.db, at: new Date().toISOString() });
     return d;
   });
