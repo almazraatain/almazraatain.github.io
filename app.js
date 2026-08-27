@@ -3,7 +3,7 @@
 'use strict';
 
 /* ═══════════ الإعدادات ═══════════ */
-var API_DEFAULT = 'https://script.google.com/macros/s/AKfycbwaKs32n8A10VklC1XILzdrM0mZPOl2zi5KAuAa96NeNy2kD07aK5Z7WUuk1cRt5_1nKg/exec';
+var API_DEFAULT = 'https://script.google.com/macros/s/AKfycbx4awKTyV0u6CfF_SmgXxNu50xxbFSpL08PxGgoL_TLqZyXDtnrc8yrAiKBzmAjaXEQdw/exec';
 
 /* رابط النشر يتبدّل مع كل نشر جديد. أي جهاز حفظ الرابط القديم محليًا
    يبقى يخاطب نشرًا ميتًا للأبد، فنُسقط المحفوظ كلما تغيّر الرابط المدمج. */
