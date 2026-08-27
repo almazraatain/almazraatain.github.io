@@ -16,7 +16,7 @@ function appVer() {
 }
 var APP_V = appVer();
 
-var API_DEFAULT = 'https://script.google.com/macros/s/AKfycbx4awKTyV0u6CfF_SmgXxNu50xxbFSpL08PxGgoL_TLqZyXDtnrc8yrAiKBzmAjaXEQdw/exec';
+var API_DEFAULT = 'https://script.google.com/macros/s/AKfycbwdv1I5JlkemEBN3MMUUJfOlDlSN0o2C_3Y-fy0S6pIjWk5vQ13_FWi332gORIxZFPShQ/exec';
 
 /* رابط النشر يتبدّل مع كل نشر جديد. أي جهاز حفظ الرابط القديم محليًا
    يبقى يخاطب نشرًا ميتًا للأبد، فنُسقط المحفوظ كلما تغيّر الرابط المدمج. */
