@@ -60,7 +60,7 @@ pre{background:#12211c;color:#dfe9e4;padding:18px;border-radius:14px;overflow:au
 
 <div class="copybar">
 <button class="copybtn" id="cp">نسخ الكود كاملًا</button>
-<span class="meta">833 سطرًا · 35.5 ك.ب</span>
+<span class="meta">851 سطرًا · 36.3 ك.ب</span>
 </div>
 <pre id="code">var K = &#x27;mzr-key-2026-almazraatain&#x27;;
 var SS = SpreadsheetApp.getActive();
@@ -408,8 +408,26 @@ function all(u) {
     payments: rows(&#x27;Payments&#x27;),
     packing: rows(&#x27;Packing&#x27;),
     units: getUnits(),
-    users: u.role === &#x27;admin&#x27; ? clean(rows(&#x27;Users&#x27;)) : []
+    users: u.role === &#x27;admin&#x27; ? clean(rows(&#x27;Users&#x27;)) : [],
+    authLog: u.role === &#x27;admin&#x27; ? authLog(120) : []
   };
+}
+
+/* حركات الدخول للمدير. ورقة السجل تكبر بلا حد، فنقرأ آخر شريحة منها فقط
+   بدل الورقة كاملة — وإلا بطؤ كل تحديث للبيانات مع مرور الأشهر. */
+function authLog(n) {
+  var s = sh(&#x27;Log&#x27;), last = s.getLastRow();
+  if (last &lt; 2) return [];
+  var take = Math.min(last - 1, 500);
+  var vals = s.getRange(last - take + 1, 1, take, COLS.Log.length).getValues();
+  var out = [];
+  for (var i = vals.length - 1; i &gt;= 0 &amp;&amp; out.length &lt; n; i--) {
+    var a = String(vals[i][2]);
+    if (a === &#x27;logout&#x27; || a.substring(0, 5) === &#x27;login&#x27;) {
+      out.push({ date: vals[i][0], userName: vals[i][1], action: a, detail: vals[i][3] });
+    }
+  }
+  return out;
 }
 
 function folder() {

@@ -344,8 +344,26 @@ function all(u) {
     payments: rows('Payments'),
     packing: rows('Packing'),
     units: getUnits(),
-    users: u.role === 'admin' ? clean(rows('Users')) : []
+    users: u.role === 'admin' ? clean(rows('Users')) : [],
+    authLog: u.role === 'admin' ? authLog(120) : []
   };
+}
+
+/* حركات الدخول للمدير. ورقة السجل تكبر بلا حد، فنقرأ آخر شريحة منها فقط
+   بدل الورقة كاملة — وإلا بطؤ كل تحديث للبيانات مع مرور الأشهر. */
+function authLog(n) {
+  var s = sh('Log'), last = s.getLastRow();
+  if (last < 2) return [];
+  var take = Math.min(last - 1, 500);
+  var vals = s.getRange(last - take + 1, 1, take, COLS.Log.length).getValues();
+  var out = [];
+  for (var i = vals.length - 1; i >= 0 && out.length < n; i--) {
+    var a = String(vals[i][2]);
+    if (a === 'logout' || a.substring(0, 5) === 'login') {
+      out.push({ date: vals[i][0], userName: vals[i][1], action: a, detail: vals[i][3] });
+    }
+  }
+  return out;
 }
 
 function folder() {

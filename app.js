@@ -74,7 +74,7 @@ var S = {
   photo: null,
   queue: [], syncing: false, online: navigator.onLine,
   units: ['صندوق', 'بوكس', 'سلة'],
-  db: { harvests: [], sales: [], expenses: [], payments: [], packing: [], users: [] }
+  db: { harvests: [], sales: [], expenses: [], payments: [], packing: [], users: [], authLog: [] }
 };
 
 var root = document.getElementById('root');
@@ -1415,7 +1415,8 @@ function aside(title, items) {
 /* ═══════════ لوحة الإدارة ═══════════ */
 var TABS = [
   ['overview', 'نظرة عامة'], ['harvests', 'الإنتاج'], ['sales', 'المبيعات'],
-  ['expenses', 'المصروفات'], ['partners', 'الشركاء'], ['users', 'المستخدمون'], ['tools', 'الرموز والأدوات']
+  ['expenses', 'المصروفات'], ['partners', 'الشركاء'], ['users', 'المستخدمون'],
+  ['access', 'من دخل ومتى'], ['tools', 'الرموز والأدوات']
 ];
 
 function viewAdmin() {
@@ -1425,7 +1426,8 @@ function viewAdmin() {
     }).join('') + '</div>' +
     (S.tab === 'harvests' ? tabHarvests() : S.tab === 'sales' ? tabSales() :
      S.tab === 'expenses' ? tabExpenses() : S.tab === 'partners' ? tabPartners() :
-     S.tab === 'users' ? tabUsers() : S.tab === 'tools' ? tabTools() : tabOverview()) +
+     S.tab === 'users' ? tabUsers() : S.tab === 'access' ? tabAccess() :
+     S.tab === 'tools' ? tabTools() : tabOverview()) +
   '</section>';
 }
 
@@ -1564,6 +1566,63 @@ function tabUsers() {
     '<button class="addbtn" data-act="newUser">+ إضافة مستخدم جديد</button></div>';
 }
 
+/* من دخل ومتى — يقرأ من سجل الخادم مباشرة */
+var ACCESS_KINDS = {
+  login:          { label: 'دخول',           tone: '',      icon: '→' },
+  logout:         { label: 'خروج',           tone: 'grey',  icon: '←' },
+  'login-failed': { label: 'محاولة فاشلة',   tone: 'red',   icon: '✕' },
+  'login-locked': { label: 'قفل بعد المحاولات', tone: 'red', icon: '⊘' }
+};
+
+function tabAccess() {
+  var rowsAll = S.db.authLog || [];
+  var names = uniq(rowsAll.map(function (r) { return r.userName; }).filter(function (x) { return x && x !== '-'; }));
+  var who = S.accWho || '';
+  var onlyBad = S.accBad === 1;
+  var list = rowsAll.filter(function (r) {
+    if (who && r.userName !== who) return false;
+    if (onlyBad && r.action.indexOf('failed') < 0 && r.action.indexOf('locked') < 0) return false;
+    return true;
+  });
+
+  var lastBy = {};
+  rowsAll.forEach(function (r) {
+    if (r.action !== 'login' || !r.userName || r.userName === '-') return;
+    if (!lastBy[r.userName]) lastBy[r.userName] = r.date;
+  });
+  var bad = rowsAll.filter(function (r) { return r.action.indexOf('failed') > -1 || r.action.indexOf('locked') > -1; });
+
+  return '<div class="chart-card"><h2>من دخل ومتى</h2>' +
+    '<p class="password-hint" style="margin:-4px 0 14px!important">آخر ' + num(rowsAll.length) + ' حركة دخول وخروج · تُحدَّث مع «تحديث البيانات»</p>' +
+
+    (Object.keys(lastBy).length ? '<div style="margin-bottom:14px">' + Object.keys(lastBy).map(function (n) {
+      return '<div class="sum-line"><span>' + esc(n) + '</span><span>آخر دخول ' + esc(dtShort(lastBy[n])) + ' — ' + esc(tm(lastBy[n])) + ' <small>(' + esc(ago(lastBy[n])) + ')</small></span></div>';
+    }).join('') + '</div>' : '') +
+
+    (bad.length ? '<div class="sum-line total"><span>محاولات فاشلة في السجل</span><span class="tag red">' + num(bad.length) + '</span></div>' : '') +
+
+    /* أزرار حبّية لا شريط تبويبات — حتى لا تلتبس بتبويبات اللوحة فوقها */
+    '<div class="unit-pick" style="margin:14px 0;flex-wrap:wrap">' +
+      '<button type="button" data-act="accWho" data-w="" class="' + (who ? '' : 'active') + '">الكل</button>' +
+      names.map(function (n) {
+        return '<button type="button" data-act="accWho" data-w="' + esc(n) + '" class="' + (who === n ? 'active' : '') + '">' + esc(n) + '</button>';
+      }).join('') +
+      '<button type="button" data-act="accBad" class="' + (onlyBad ? 'active' : '') + '">✕ الفاشلة فقط</button>' +
+    '</div>' +
+
+    (list.length ? '<div class="tablewrap"><table class="data"><thead><tr>' +
+      '<th>التاريخ</th><th>الوقت</th><th>المستخدم</th><th>الحدث</th><th>التفاصيل</th><th>منذ</th>' +
+      '</tr></thead><tbody>' + list.map(function (r) {
+        var k = ACCESS_KINDS[r.action] || { label: r.action, tone: '', icon: '·' };
+        return '<tr><td>' + esc(dtShort(r.date)) + '</td><td>' + esc(tm(r.date)) + '</td>' +
+          '<td><b>' + esc(r.userName === '-' ? 'غير معروف' : r.userName) + '</b></td>' +
+          '<td><span class="tag ' + k.tone + '">' + k.icon + ' ' + esc(k.label) + '</span></td>' +
+          '<td>' + esc(r.detail || '—') + '</td><td>' + esc(ago(r.date)) + '</td></tr>';
+      }).join('') + '</tbody></table></div>'
+      : '<p class="empty-state">لا توجد حركات دخول مطابقة.<br><small>الحركات تُسجَّل من لحظة تحديث كود الخادم — لن تظهر عمليات دخول أقدم منه.</small></p>') +
+  '</div>';
+}
+
 function tabTools() {
   return '<div class="chart-card"><h2>أنواع التعبئة</h2>' +
     '<p class="password-hint" style="margin:0 0 14px!important">الأنواع المستخدمة في القطاف والبيع والتعبئة. حذف نوع لا يمس السجلات القديمة، لكنه يمنع استخدامه في عمليات جديدة.</p>' +
@@ -1686,6 +1745,8 @@ document.addEventListener('click', function (e) {
     render(); return;
   }
   if (a === 'tab') { S.tab = el.getAttribute('data-t'); render(); return; }
+  if (a === 'accWho') { S.accWho = el.getAttribute('data-w') || ''; render(); return; }
+  if (a === 'accBad') { S.accBad = S.accBad === 1 ? 0 : 1; render(); return; }
   if (a === 'sync') { el.disabled = true; refresh().then(function () { render(); toast('تم تحديث البيانات', 'good'); }).catch(function (x) { el.disabled = false; toast(x.message, 'bad'); }); return; }
   if (a === 'logout') return doLogout();
   if (a === 'farm') { S.farm = el.getAttribute('data-f'); S.located = false; render(); return; }
@@ -1999,7 +2060,8 @@ function refresh() {
   return call('all', {}).then(function (d) {
     S.user = d.user;
     S.db = { harvests: d.harvests || [], sales: d.sales || [], expenses: d.expenses || [],
-             payments: d.payments || [], packing: d.packing || [], users: d.users || [] };
+             payments: d.payments || [], packing: d.packing || [], users: d.users || [],
+             authLog: d.authLog || [] };
     if (d.units && d.units.length) S.units = d.units;
     idbPut('cache', { key: 'db', user: d.user, db: S.db, at: new Date().toISOString() });
     return d;
