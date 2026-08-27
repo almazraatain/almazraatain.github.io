@@ -5,8 +5,10 @@ var PHOTOS = 'almazraatain-photos';
 var COLS = {
   Users: ['id','phone','name','role','hash','active','created','email'],
   Sessions: ['token','userId','expires'],
-  Harvests: ['id','date','capturedAt','farm','baskets','batch','photo','lat','lng','device','gate','aiBaskets','aiQuality','aiNotes','unit','userId','userName','void','voidReason','opId'],
-  Sales: ['id','date','capturedAt','farm','baskets','gross','commission','transport','net','ptype','customer','due','lat','lng','device','unit','userId','userName','void','voidReason','opId'],
+  /* «unit» مضاف في النهاية عمدًا: الترقية تلحق الأعمدة الجديدة آخر الجدول فقط،
+     ووضعه في المنتصف يكسر مطابقة أعمدة السجلات القائمة ويوقف الترقية. */
+  Harvests: ['id','date','capturedAt','farm','baskets','batch','photo','lat','lng','device','gate','aiBaskets','aiQuality','aiNotes','userId','userName','void','voidReason','opId','unit'],
+  Sales: ['id','date','capturedAt','farm','baskets','gross','commission','transport','net','ptype','customer','due','lat','lng','device','userId','userName','void','voidReason','opId','unit'],
   Expenses: ['id','date','capturedAt','category','amount','farm','payer','notes','photo','lat','lng','device','userId','userName','void','voidReason','opId'],
   Payments: ['id','date','saleId','amount','method','userId','userName','void','voidReason','opId'],
   Packing: ['id','date','farm','fromUnit','fromQty','toUnit','toQty','notes','userId','userName','void','voidReason','opId'],
@@ -353,16 +355,16 @@ function stock(farm, unit) {
   var total = 0, i;
   var hs = rows('Harvests');
   for (i = 0; i < hs.length; i++) {
-    if (hs[i].farm === farm && unitOf(hs[i]) === unit && hs[i]['void'] !== true) total += Number(hs[i].baskets) || 0;
+    if (hs[i].farm === farm && unitOf(hs[i]) === unit && !isTrue(hs[i]['void'])) total += Number(hs[i].baskets) || 0;
   }
   var ss = rows('Sales');
   for (i = 0; i < ss.length; i++) {
-    if (ss[i].farm === farm && unitOf(ss[i]) === unit && ss[i]['void'] !== true) total -= Number(ss[i].baskets) || 0;
+    if (ss[i].farm === farm && unitOf(ss[i]) === unit && !isTrue(ss[i]['void'])) total -= Number(ss[i].baskets) || 0;
   }
   /* التعبئة تنقص من النوع المصدر وتزيد النوع الناتج */
   var pk = rows('Packing');
   for (i = 0; i < pk.length; i++) {
-    if (pk[i].farm !== farm || pk[i]['void'] === true) continue;
+    if (pk[i].farm !== farm || isTrue(pk[i]['void'])) continue;
     if (String(pk[i].fromUnit) === unit) total -= Number(pk[i].fromQty) || 0;
     if (String(pk[i].toUnit) === unit) total += Number(pk[i].toQty) || 0;
   }
@@ -481,6 +483,7 @@ function voidRow(b, u) {
       if (t === 'Packing' && stock(list[i].farm, String(list[i].toUnit)) - Number(list[i].toQty) < 0) return { error: 'STOCK_LOCK' };
       s.getRange(list[i]._row, col).setValue(true);
       s.getRange(list[i]._row, col + 1).setValue(b.reason || '');
+      dirty(t);
       log(u, 'void', t + ' / ' + b.id + ' / ' + (b.reason || ''));
       return { ok: 1 };
     }

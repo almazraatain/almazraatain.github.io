@@ -60,46 +60,50 @@ pre{background:#12211c;color:#dfe9e4;padding:18px;border-radius:14px;overflow:au
 
 <div class="copybar">
 <button class="copybtn" id="cp">نسخ الكود كاملًا</button>
-<span class="meta">751 سطرًا · 28.5 ك.ب</span>
+<span class="meta">818 سطرًا · 34.8 ك.ب</span>
 </div>
-<pre id="code">var K = 'mzr-key-2026-almazraatain';
+<pre id="code">var K = &#x27;mzr-key-2026-almazraatain&#x27;;
 var SS = SpreadsheetApp.getActive();
-var PHOTOS = 'almazraatain-photos';
+var PHOTOS = &#x27;almazraatain-photos&#x27;;
 
 var COLS = {
-  Users: ['id','phone','name','role','hash','active','created','email'],
-  Sessions: ['token','userId','expires'],
-  Harvests: ['id','date','capturedAt','farm','baskets','batch','photo','lat','lng','device','gate','aiBaskets','aiQuality','aiNotes','userId','userName','void','voidReason','opId'],
-  Sales: ['id','date','capturedAt','farm','baskets','gross','commission','transport','net','ptype','customer','due','lat','lng','device','userId','userName','void','voidReason','opId'],
-  Expenses: ['id','date','capturedAt','category','amount','farm','payer','notes','photo','lat','lng','device','userId','userName','void','voidReason','opId'],
-  Payments: ['id','date','saleId','amount','method','userId','userName','void','voidReason','opId'],
-  Log: ['date','userName','action','detail']
+  Users: [&#x27;id&#x27;,&#x27;phone&#x27;,&#x27;name&#x27;,&#x27;role&#x27;,&#x27;hash&#x27;,&#x27;active&#x27;,&#x27;created&#x27;,&#x27;email&#x27;],
+  Sessions: [&#x27;token&#x27;,&#x27;userId&#x27;,&#x27;expires&#x27;],
+  /* «unit» مضاف في النهاية عمدًا: الترقية تلحق الأعمدة الجديدة آخر الجدول فقط،
+     ووضعه في المنتصف يكسر مطابقة أعمدة السجلات القائمة ويوقف الترقية. */
+  Harvests: [&#x27;id&#x27;,&#x27;date&#x27;,&#x27;capturedAt&#x27;,&#x27;farm&#x27;,&#x27;baskets&#x27;,&#x27;batch&#x27;,&#x27;photo&#x27;,&#x27;lat&#x27;,&#x27;lng&#x27;,&#x27;device&#x27;,&#x27;gate&#x27;,&#x27;aiBaskets&#x27;,&#x27;aiQuality&#x27;,&#x27;aiNotes&#x27;,&#x27;userId&#x27;,&#x27;userName&#x27;,&#x27;void&#x27;,&#x27;voidReason&#x27;,&#x27;opId&#x27;,&#x27;unit&#x27;],
+  Sales: [&#x27;id&#x27;,&#x27;date&#x27;,&#x27;capturedAt&#x27;,&#x27;farm&#x27;,&#x27;baskets&#x27;,&#x27;gross&#x27;,&#x27;commission&#x27;,&#x27;transport&#x27;,&#x27;net&#x27;,&#x27;ptype&#x27;,&#x27;customer&#x27;,&#x27;due&#x27;,&#x27;lat&#x27;,&#x27;lng&#x27;,&#x27;device&#x27;,&#x27;userId&#x27;,&#x27;userName&#x27;,&#x27;void&#x27;,&#x27;voidReason&#x27;,&#x27;opId&#x27;,&#x27;unit&#x27;],
+  Expenses: [&#x27;id&#x27;,&#x27;date&#x27;,&#x27;capturedAt&#x27;,&#x27;category&#x27;,&#x27;amount&#x27;,&#x27;farm&#x27;,&#x27;payer&#x27;,&#x27;notes&#x27;,&#x27;photo&#x27;,&#x27;lat&#x27;,&#x27;lng&#x27;,&#x27;device&#x27;,&#x27;userId&#x27;,&#x27;userName&#x27;,&#x27;void&#x27;,&#x27;voidReason&#x27;,&#x27;opId&#x27;],
+  Payments: [&#x27;id&#x27;,&#x27;date&#x27;,&#x27;saleId&#x27;,&#x27;amount&#x27;,&#x27;method&#x27;,&#x27;userId&#x27;,&#x27;userName&#x27;,&#x27;void&#x27;,&#x27;voidReason&#x27;,&#x27;opId&#x27;],
+  Packing: [&#x27;id&#x27;,&#x27;date&#x27;,&#x27;farm&#x27;,&#x27;fromUnit&#x27;,&#x27;fromQty&#x27;,&#x27;toUnit&#x27;,&#x27;toQty&#x27;,&#x27;notes&#x27;,&#x27;userId&#x27;,&#x27;userName&#x27;,&#x27;void&#x27;,&#x27;voidReason&#x27;,&#x27;opId&#x27;],
+  Log: [&#x27;date&#x27;,&#x27;userName&#x27;,&#x27;action&#x27;,&#x27;detail&#x27;]
 };
 
-function doGet(e) { return j({ ok: 1, api: 'almazraatain' }); }
+function doGet(e) { return j({ ok: 1, api: &#x27;almazraatain&#x27; }); }
 
 function doPost(e) {
   var b;
-  try { b = JSON.parse(e.postData.contents); } catch (x) { return j({ error: 'BAD_JSON' }); }
-  if (b.k !== K) return j({ error: 'BAD_KEY' });
+  try { b = JSON.parse(e.postData.contents); } catch (x) { return j({ error: &#x27;BAD_JSON&#x27; }); }
+  if (b.k !== K) return j({ error: &#x27;BAD_KEY&#x27; });
   try {
-    if (b.a === 'status') return j({ needsSetup: rows('Users').length === 0 });
-    if (b.a === 'setup') return j(setup(b));
-    if (b.a === 'login') return j(login(b));
-    if (b.a === 'forgot') return j(forgot(b));
-    if (b.a === 'reset') return j(resetPass(b));
+    if (b.a === &#x27;status&#x27;) return j({ needsSetup: rows(&#x27;Users&#x27;).length === 0 });
+    if (b.a === &#x27;setup&#x27;) return j(setup(b));
+    if (b.a === &#x27;login&#x27;) return j(login(b));
+    if (b.a === &#x27;forgot&#x27;) return j(forgot(b));
+    if (b.a === &#x27;reset&#x27;) return j(resetPass(b));
     var u = auth(b.t);
-    if (!u) return j({ error: 'NO_SESSION' });
-    if (b.a === 'all') return j(all(u));
-    if (b.a === 'add') return j(add(b, u));
-    if (b.a === 'void') return j(voidRow(b, u));
-    if (b.a === 'img') return j(img(b));
-    if (b.a === 'ai') return j(aiRun(b, u));
-    if (b.a === 'adduser') return j(addUser(b, u));
-    if (b.a === 'setuser') return j(setUser(b, u));
-    if (b.a === 'logout') return j(logout(b));
-    return j({ error: 'BAD_ACTION' });
-  } catch (err) { return j({ error: 'ERR', detail: String(err) }); }
+    if (!u) return j({ error: &#x27;NO_SESSION&#x27; });
+    if (b.a === &#x27;all&#x27;) return j(all(u));
+    if (b.a === &#x27;add&#x27;) return j(add(b, u));
+    if (b.a === &#x27;void&#x27;) return j(voidRow(b, u));
+    if (b.a === &#x27;img&#x27;) return j(img(b));
+    if (b.a === &#x27;ai&#x27;) return j(aiRun(b, u));
+    if (b.a === &#x27;setunits&#x27;) return j(setUnits(b, u));
+    if (b.a === &#x27;adduser&#x27;) return j(addUser(b, u));
+    if (b.a === &#x27;setuser&#x27;) return j(setUser(b, u));
+    if (b.a === &#x27;logout&#x27;) return j(logout(b));
+    return j({ error: &#x27;BAD_ACTION&#x27; });
+  } catch (err) { return j({ error: &#x27;ERR&#x27;, detail: String(err) }); }
 }
 
 function j(o) {
@@ -108,8 +112,8 @@ function j(o) {
 
 /* الأعمدة الرقمية والمنطقية تبقى بصيغتها، وكل ما عداها يُجبر كنص صريح
    حتى لا تحوّل Sheets رقم الجوال (+966...) لمعادلة أو التواريخ لصيغة أخرى. */
-var NUMCOLS = ['baskets','gross','commission','transport','net','amount','lat','lng','aiBaskets','aiQuality'];
-var BOOLCOLS = ['active','void'];
+var NUMCOLS = [&#x27;baskets&#x27;,&#x27;gross&#x27;,&#x27;commission&#x27;,&#x27;transport&#x27;,&#x27;net&#x27;,&#x27;amount&#x27;,&#x27;lat&#x27;,&#x27;lng&#x27;,&#x27;aiBaskets&#x27;,&#x27;aiQuality&#x27;,&#x27;fromQty&#x27;,&#x27;toQty&#x27;];
+var BOOLCOLS = [&#x27;active&#x27;,&#x27;void&#x27;];
 
 function sh(n) {
   var s = SS.getSheetByName(n);
@@ -122,7 +126,7 @@ function sh(n) {
 function fmtCol(s, n, i) {
   var c = COLS[n][i];
   if (NUMCOLS.indexOf(c) &lt; 0 &amp;&amp; BOOLCOLS.indexOf(c) &lt; 0) {
-    s.getRange(1, i + 1, s.getMaxRows(), 1).setNumberFormat('@');
+    s.getRange(1, i + 1, s.getMaxRows(), 1).setNumberFormat(&#x27;@&#x27;);
   }
 }
 
@@ -143,8 +147,8 @@ function migrate(s, n) {
   var have = s.getRange(1, 1, 1, lastCol).getValues()[0];
   for (var i = 0; i &lt; have.length; i++) {
     if (String(have[i]) !== want[i]) {
-      throw new Error('ترتيب أعمدة ' + n + ' لا يطابق الكود عند العمود ' + (i + 1) +
-        ' (' + have[i] + ' مقابل ' + want[i] + ') — أوقفت التعديل حماية للبيانات.');
+      throw new Error(&#x27;ترتيب أعمدة &#x27; + n + &#x27; لا يطابق الكود عند العمود &#x27; + (i + 1) +
+        &#x27; (&#x27; + have[i] + &#x27; مقابل &#x27; + want[i] + &#x27;) — أوقفت التعديل حماية للبيانات.&#x27;);
     }
   }
   for (var c = lastCol; c &lt; want.length; c++) {
@@ -181,23 +185,23 @@ function readRows(n) {
 
 function append(n, o) {
   var head = COLS[n], line = [];
-  for (var c = 0; c &lt; head.length; c++) line.push(o[head[c]] === undefined ? '' : o[head[c]]);
+  for (var c = 0; c &lt; head.length; c++) line.push(o[head[c]] === undefined ? &#x27;&#x27; : o[head[c]]);
   sh(n).appendRow(line);
   dirty(n);
 }
 
-function uid() { return Utilities.getUuid().replace(/-/g, '').substring(0, 12); }
+function uid() { return Utilities.getUuid().replace(/-/g, &#x27;&#x27;).substring(0, 12); }
 function now() { return new Date().toISOString(); }
 
 function hash(pass, salt) {
-  var raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + '|' + pass, Utilities.Charset.UTF_8);
+  var raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + &#x27;|&#x27; + pass, Utilities.Charset.UTF_8);
   return Utilities.base64Encode(raw);
 }
 
 function mkToken(userId) {
   var token = uid() + uid() + uid();
   var exp = new Date(Date.now() + 30 * 864e5).toISOString();
-  append('Sessions', { token: token, userId: userId, expires: exp });
+  append(&#x27;Sessions&#x27;, { token: token, userId: userId, expires: exp });
   return token;
 }
 
@@ -205,22 +209,22 @@ function mkToken(userId) {
    ننظّف المنتهية مرة كل يوم فيبقى الجدول صغيرًا. */
 function sweepSessions() {
   var props = PropertiesService.getScriptProperties();
-  var last = Number(props.getProperty('SWEEP_AT') || 0);
+  var last = Number(props.getProperty(&#x27;SWEEP_AT&#x27;) || 0);
   if (Date.now() - last &lt; 864e5) return;
-  props.setProperty('SWEEP_AT', String(Date.now()));
-  var sheet = sh('Sessions'), ss = readRows('Sessions'), t = now(), n = 0;
+  props.setProperty(&#x27;SWEEP_AT&#x27;, String(Date.now()));
+  var sheet = sh(&#x27;Sessions&#x27;), ss = readRows(&#x27;Sessions&#x27;), t = now(), n = 0;
   for (var i = ss.length - 1; i &gt;= 0; i--) {
     if (String(ss[i].expires) &lt;= t) { sheet.deleteRow(ss[i]._row); n++; }
   }
-  if (n) dirty('Sessions');
+  if (n) dirty(&#x27;Sessions&#x27;);
   normalisePhones();
 }
 
 /* يوحّد أرقام الجوال المخزّنة سابقًا على صيغة 05 — لا يغيّر الرقم نفسه
    بل شكله فقط، والمطابقة تعمل قبل التوحيد وبعده. */
 function normalisePhones() {
-  var us = readRows('Users'), sheet = sh('Users');
-  var col = COLS.Users.indexOf('phone') + 1, n = 0;
+  var us = readRows(&#x27;Users&#x27;), sheet = sh(&#x27;Users&#x27;);
+  var col = COLS.Users.indexOf(&#x27;phone&#x27;) + 1, n = 0;
   for (var i = 0; i &lt; us.length; i++) {
     var want = local05(us[i].phone);
     if (want &amp;&amp; /^05[0-9]{8}$/.test(want) &amp;&amp; String(us[i].phone) !== want) {
@@ -228,16 +232,16 @@ function normalisePhones() {
       n++;
     }
   }
-  if (n) dirty('Users');
+  if (n) dirty(&#x27;Users&#x27;);
 }
 
 function auth(token) {
   if (!token) return null;
   sweepSessions();
-  var ss = rows('Sessions');
+  var ss = rows(&#x27;Sessions&#x27;);
   for (var i = 0; i &lt; ss.length; i++) {
     if (ss[i].token === token &amp;&amp; String(ss[i].expires) &gt; now()) {
-      var us = rows('Users');
+      var us = rows(&#x27;Users&#x27;);
       for (var u = 0; u &lt; us.length; u++) {
         if (us[u].id === ss[i].userId &amp;&amp; isTrue(us[u].active)) return us[u];
       }
@@ -247,27 +251,27 @@ function auth(token) {
 }
 
 function logout(b) {
-  var s = sh('Sessions'), ss = rows('Sessions');
+  var s = sh(&#x27;Sessions&#x27;), ss = rows(&#x27;Sessions&#x27;);
   for (var i = ss.length - 1; i &gt;= 0; i--) if (ss[i].token === b.t) s.deleteRow(ss[i]._row);
-  dirty('Sessions');
+  dirty(&#x27;Sessions&#x27;);
   return { ok: 1 };
 }
 
 function log(user, action, detail) {
-  append('Log', { date: now(), userName: user ? user.name : '-', action: action, detail: detail });
+  append(&#x27;Log&#x27;, { date: now(), userName: user ? user.name : &#x27;-&#x27;, action: action, detail: detail });
 }
 
 function setup(b) {
-  if (rows('Users').length &gt; 0) return { error: 'ALREADY_SETUP' };
-  if (!b.pass || b.pass.length &lt; 8) return { error: 'SHORT_PASS' };
+  if (rows(&#x27;Users&#x27;).length &gt; 0) return { error: &#x27;ALREADY_SETUP&#x27; };
+  if (!b.pass || b.pass.length &lt; 8) return { error: &#x27;SHORT_PASS&#x27; };
   var em = canonEmail(b.email);
-  if (!validEmail(em)) return { error: 'BAD_EMAIL' };
+  if (!validEmail(em)) return { error: &#x27;BAD_EMAIL&#x27; };
   var id = uid(), salt = uid();
-  var nm = b.name || 'Admin';
-  append('Users', { id: id, phone: local05(b.phone), name: nm, role: 'admin',
-    hash: salt + '$' + hash(b.pass, salt), active: true, created: now(), email: em });
-  var user = { id: id, name: nm, role: 'admin' };
-  log(user, 'setup', b.phone);
+  var nm = b.name || &#x27;Admin&#x27;;
+  append(&#x27;Users&#x27;, { id: id, phone: local05(b.phone), name: nm, role: &#x27;admin&#x27;,
+    hash: salt + &#x27;$&#x27; + hash(b.pass, salt), active: true, created: now(), email: em });
+  var user = { id: id, name: nm, role: &#x27;admin&#x27; };
+  log(user, &#x27;setup&#x27;, b.phone);
   return { ok: 1, t: mkToken(id), user: user };
 }
 
@@ -278,18 +282,18 @@ var LOCK_MIN = 15;
 /* مفتاح القفل يُبنى على الرقم بعد توحيده لا على نصّه كما أُرسل.
    بدون ذلك يصير لكل صيغة عدّاد مستقل (05… و966… و+966…)
    فيتجاوز المخمِّن الحدَّ بمجرد تبديل الصيغة كل خمس محاولات. */
-function lockKey(phone) { return 'f_' + canonPhone(phone); }
+function lockKey(phone) { return &#x27;f_&#x27; + canonPhone(phone); }
 
 /* المعرّف قد يكون بريدًا أو جوالًا — مفتاح القفل يتبعه */
 function idKey(raw) {
-  var v = String(raw === undefined || raw === null ? '' : raw);
-  return v.indexOf('@') &gt;= 0 ? ('fe_' + canonEmail(v)) : lockKey(v);
+  var v = String(raw === undefined || raw === null ? &#x27;&#x27; : raw);
+  return v.indexOf(&#x27;@&#x27;) &gt;= 0 ? (&#x27;fe_&#x27; + canonEmail(v)) : lockKey(v);
 }
 
 /* الصيغة المعتمدة للتخزين والعرض: 05xxxxxxxx بلا مفتاح دولة */
 function local05(v) {
   var d = canonPhone(v);
-  return /^5[0-9]{8}$/.test(d) ? '0' + d : String(v === undefined || v === null ? '' : v);
+  return /^5[0-9]{8}$/.test(d) ? &#x27;0&#x27; + d : String(v === undefined || v === null ? &#x27;&#x27; : v);
 }
 
 function tries(phone) {
@@ -307,7 +311,7 @@ function bump(phone, ok) {
 
 /* مقارنة الجوال بالأرقام فقط — تنجح حتى لو أزالت Sheets علامة + */
 function digitsOf(v) {
-  var s = String(v === undefined || v === null ? '' : v);
+  var s = String(v === undefined || v === null ? &#x27;&#x27; : v);
   /* الأرقام العربية-الهندية والفارسية تُحوَّل قبل أي معالجة */
   s = s.replace(/[\u0660-\u0669]/g, function (c) { return c.charCodeAt(0) - 0x0660; })
        .replace(/[\u06F0-\u06F9]/g, function (c) { return c.charCodeAt(0) - 0x06F0; });
@@ -316,16 +320,16 @@ function digitsOf(v) {
     var n = Number(s);
     if (isFinite(n)) s = n.toFixed(0);
   }
-  return s.replace(/[^0-9]/g, '');
+  return s.replace(/[^0-9]/g, &#x27;&#x27;);
 }
 /* صيغة قياسية واحدة للرقم مهما كُتب:
    05x · 5x · 9665x · +9665x · 009665x  -&gt;  5x
    تستخدمها المطابقة ومفتاح القفل معًا حتى لا يختلفا. */
 function canonPhone(v) {
   var d = digitsOf(v);
-  d = d.replace(/^0+/, '');
-  if (d.indexOf('966') === 0) d = d.substring(3);
-  return d.replace(/^0+/, '');
+  d = d.replace(/^0+/, &#x27;&#x27;);
+  if (d.indexOf(&#x27;966&#x27;) === 0) d = d.substring(3);
+  return d.replace(/^0+/, &#x27;&#x27;);
 }
 
 function samePhone(a, b) {
@@ -334,30 +338,30 @@ function samePhone(a, b) {
 }
 
 /* الحقول المنطقية قد تعود نصًا من Sheets */
-function isTrue(v) { return v === true || String(v).toUpperCase() === 'TRUE'; }
+function isTrue(v) { return v === true || String(v).toUpperCase() === &#x27;TRUE&#x27;; }
 
 function login(b) {
   /* المعرّف: البريد أولًا، ويُقبل الجوال أيضًا للحسابات القديمة بلا بريد */
-  var raw = String(b.id !== undefined &amp;&amp; b.id !== null &amp;&amp; b.id !== ''
-    ? b.id : (b.phone === undefined || b.phone === null ? '' : b.phone));
-  var byEmail = raw.indexOf('@') &gt;= 0;
+  var raw = String(b.id !== undefined &amp;&amp; b.id !== null &amp;&amp; b.id !== &#x27;&#x27;
+    ? b.id : (b.phone === undefined || b.phone === null ? &#x27;&#x27; : b.phone));
+  var byEmail = raw.indexOf(&#x27;@&#x27;) &gt;= 0;
   var key = idKey(raw);
 
   var props = PropertiesService.getScriptProperties();
   var p = props.getProperty(key);
   var rec = p ? JSON.parse(p) : { n: 0, at: 0 };
   var mins = (Date.now() - rec.at) / 60000;
-  if (rec.n &gt;= MAX_TRIES &amp;&amp; mins &lt; LOCK_MIN) return { error: 'LOCKED' };
+  if (rec.n &gt;= MAX_TRIES &amp;&amp; mins &lt; LOCK_MIN) return { error: &#x27;LOCKED&#x27; };
   if (mins &gt;= LOCK_MIN) props.deleteProperty(key);
 
-  var us = rows('Users');
+  var us = rows(&#x27;Users&#x27;);
   for (var i = 0; i &lt; us.length; i++) {
     var u = us[i];
     var hit = byEmail
-      ? (canonEmail(u.email) !== '' &amp;&amp; canonEmail(u.email) === canonEmail(raw))
+      ? (canonEmail(u.email) !== &#x27;&#x27; &amp;&amp; canonEmail(u.email) === canonEmail(raw))
       : samePhone(u.phone, raw);
     if (hit &amp;&amp; isTrue(u.active)) {
-      var parts = String(u.hash).split('$');
+      var parts = String(u.hash).split(&#x27;$&#x27;);
       if (hash(b.pass, parts[0]) === parts[1]) {
         props.deleteProperty(key);
         return { ok: 1, t: mkToken(u.id), user: { id: u.id, name: u.name, role: u.role } };
@@ -366,14 +370,14 @@ function login(b) {
   }
   rec.n++; rec.at = Date.now();
   props.setProperty(key, JSON.stringify(rec));
-  return { error: 'BAD_LOGIN' };
+  return { error: &#x27;BAD_LOGIN&#x27; };
 }
 
 function clean(list) {
   var out = [];
   for (var i = 0; i &lt; list.length; i++) {
     var r = list[i], o = {};
-    for (var key in r) if (key !== 'hash') o[key] = r[key];
+    for (var key in r) if (key !== &#x27;hash&#x27;) o[key] = r[key];
     out.push(o);
   }
   return out;
@@ -383,11 +387,13 @@ function all(u) {
   return {
     ok: 1,
     user: { id: u.id, name: u.name, role: u.role },
-    harvests: rows('Harvests'),
-    sales: rows('Sales'),
-    expenses: rows('Expenses'),
-    payments: rows('Payments'),
-    users: u.role === 'admin' ? clean(rows('Users')) : []
+    harvests: rows(&#x27;Harvests&#x27;),
+    sales: rows(&#x27;Sales&#x27;),
+    expenses: rows(&#x27;Expenses&#x27;),
+    payments: rows(&#x27;Payments&#x27;),
+    packing: rows(&#x27;Packing&#x27;),
+    units: getUnits(),
+    users: u.role === &#x27;admin&#x27; ? clean(rows(&#x27;Users&#x27;)) : []
   };
 }
 
@@ -397,8 +403,8 @@ function folder() {
 }
 
 function upload(b64, name) {
-  if (!b64) return '';
-  var blob = Utilities.newBlob(Utilities.base64Decode(b64), 'image/jpeg', name + '.jpg');
+  if (!b64) return &#x27;&#x27;;
+  var blob = Utilities.newBlob(Utilities.base64Decode(b64), &#x27;image/jpeg&#x27;, name + &#x27;.jpg&#x27;);
   return folder().createFile(blob).getId();
 }
 
@@ -406,32 +412,43 @@ function img(b) {
   try {
     var f = DriveApp.getFileById(b.id);
     return { ok: 1, b64: Utilities.base64Encode(f.getBlob().getBytes()) };
-  } catch (x) { return { error: 'NO_IMG' }; }
+  } catch (x) { return { error: &#x27;NO_IMG&#x27; }; }
 }
 
-function stock(farm) {
+function stock(farm, unit) {
   var total = 0, i;
-  var hs = rows('Harvests');
-  for (i = 0; i &lt; hs.length; i++) if (hs[i].farm === farm &amp;&amp; hs[i]['void'] !== true) total += Number(hs[i].baskets);
-  var ss = rows('Sales');
-  for (i = 0; i &lt; ss.length; i++) if (ss[i].farm === farm &amp;&amp; ss[i]['void'] !== true) total -= Number(ss[i].baskets);
+  var hs = rows(&#x27;Harvests&#x27;);
+  for (i = 0; i &lt; hs.length; i++) {
+    if (hs[i].farm === farm &amp;&amp; unitOf(hs[i]) === unit &amp;&amp; !isTrue(hs[i][&#x27;void&#x27;])) total += Number(hs[i].baskets) || 0;
+  }
+  var ss = rows(&#x27;Sales&#x27;);
+  for (i = 0; i &lt; ss.length; i++) {
+    if (ss[i].farm === farm &amp;&amp; unitOf(ss[i]) === unit &amp;&amp; !isTrue(ss[i][&#x27;void&#x27;])) total -= Number(ss[i].baskets) || 0;
+  }
+  /* التعبئة تنقص من النوع المصدر وتزيد النوع الناتج */
+  var pk = rows(&#x27;Packing&#x27;);
+  for (i = 0; i &lt; pk.length; i++) {
+    if (pk[i].farm !== farm || isTrue(pk[i][&#x27;void&#x27;])) continue;
+    if (String(pk[i].fromUnit) === unit) total -= Number(pk[i].fromQty) || 0;
+    if (String(pk[i].toUnit) === unit) total += Number(pk[i].toQty) || 0;
+  }
   return total;
 }
 
 /* اليوم بتوقيت الرياض (UTC+3 ثابت بلا توقيت صيفي) */
 function riyadhDay(v) {
   var d = v ? new Date(v) : new Date();
-  if (isNaN(d.getTime())) return '';
+  if (isNaN(d.getTime())) return &#x27;&#x27;;
   return new Date(d.getTime() + 3 * 3600000).toISOString().substring(0, 10);
 }
 
 function batchNo(farm, code) {
   var day = riyadhDay(), n = 1;
-  var hs = rows('Harvests');
+  var hs = rows(&#x27;Harvests&#x27;);
   for (var i = 0; i &lt; hs.length; i++) {
     if (hs[i].farm === farm &amp;&amp; riyadhDay(hs[i].date) === day) n++;
   }
-  return code + '-' + day.replace(/-/g, '') + '-' + ('00' + n).slice(-3);
+  return code + &#x27;-&#x27; + day.replace(/-/g, &#x27;&#x27;) + &#x27;-&#x27; + (&#x27;00&#x27; + n).slice(-3);
 }
 
 /* لو انقطع الاتصال بعد أن يحفظ الخادم، يعيد العميل الإرسال.
@@ -451,87 +468,107 @@ function add(b, u) {
     if (dup) {
       return { ok: 1, id: dup.id, batch: dup.batch, net: dup.net, duplicate: 1 };
     }
-    if (t === 'Harvests') {
-      if (!(Number(r.baskets) &gt; 0)) return { error: 'BAD_BASKETS' };
-      if (!b.img) return { error: 'NEED_PHOTO' };
+    if (t === &#x27;Harvests&#x27;) {
+      if (!(Number(r.baskets) &gt; 0)) return { error: &#x27;BAD_BASKETS&#x27; };
+      if (!b.img) return { error: &#x27;NEED_PHOTO&#x27; };
+      var hUnit = String(r.unit || &#x27;&#x27;).trim();
+      if (!hUnit || getUnits().indexOf(hUnit) &lt; 0) return { error: &#x27;BAD_UNIT&#x27; };
       var batch = batchNo(r.farm, r.code);
-      append('Harvests', { id: id, opId: (r.opId || ''), date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
+      append(&#x27;Harvests&#x27;, { id: id, opId: (r.opId || &#x27;&#x27;), unit: hUnit, date: now(), capturedAt: r.capturedAt || &#x27;&#x27;, farm: r.farm,
         baskets: Number(r.baskets), batch: batch, photo: upload(b.img, id),
-        lat: r.lat || '', lng: r.lng || '', device: r.device || '', gate: r.gate || '',
-        aiBaskets: r.aiBaskets === undefined || r.aiBaskets === '' ? '' : Number(r.aiBaskets),
-        aiQuality: r.aiQuality === undefined || r.aiQuality === '' ? '' : Number(r.aiQuality),
-        aiNotes: r.aiNotes || '',
-        userId: u.id, userName: u.name, 'void': false, voidReason: '' });
-      log(u, 'harvest', batch + ' / ' + r.baskets);
+        lat: r.lat || &#x27;&#x27;, lng: r.lng || &#x27;&#x27;, device: r.device || &#x27;&#x27;, gate: r.gate || &#x27;&#x27;,
+        aiBaskets: r.aiBaskets === undefined || r.aiBaskets === &#x27;&#x27; ? &#x27;&#x27; : Number(r.aiBaskets),
+        aiQuality: r.aiQuality === undefined || r.aiQuality === &#x27;&#x27; ? &#x27;&#x27; : Number(r.aiQuality),
+        aiNotes: r.aiNotes || &#x27;&#x27;,
+        userId: u.id, userName: u.name, &#x27;void&#x27;: false, voidReason: &#x27;&#x27; });
+      log(u, &#x27;harvest&#x27;, batch + &#x27; / &#x27; + r.baskets);
       return { ok: 1, id: id, batch: batch };
     }
-    if (t === 'Sales') {
+    if (t === &#x27;Sales&#x27;) {
       var n = Number(r.baskets);
-      if (!(n &gt; 0)) return { error: 'BAD_BASKETS' };
-      if (n &gt; stock(r.farm)) return { error: 'NO_STOCK' };
+      if (!(n &gt; 0)) return { error: &#x27;BAD_BASKETS&#x27; };
+      var sUnit = String(r.unit || &#x27;&#x27;).trim();
+      if (!sUnit || getUnits().indexOf(sUnit) &lt; 0) return { error: &#x27;BAD_UNIT&#x27; };
+      if (n &gt; stock(r.farm, sUnit)) return { error: &#x27;NO_STOCK&#x27; };
       var net = Number(r.gross) - Number(r.commission || 0) - Number(r.transport || 0);
-      if (net &lt; 0) return { error: 'NEG_NET' };
-      if (r.ptype === 'credit' &amp;&amp; (!r.customer || !r.due)) return { error: 'NEED_CUSTOMER' };
-      append('Sales', { id: id, opId: (r.opId || ''), date: now(), capturedAt: r.capturedAt || '', farm: r.farm,
+      if (net &lt; 0) return { error: &#x27;NEG_NET&#x27; };
+      if (r.ptype === &#x27;credit&#x27; &amp;&amp; (!r.customer || !r.due)) return { error: &#x27;NEED_CUSTOMER&#x27; };
+      append(&#x27;Sales&#x27;, { id: id, opId: (r.opId || &#x27;&#x27;), unit: sUnit, date: now(), capturedAt: r.capturedAt || &#x27;&#x27;, farm: r.farm,
         baskets: n, gross: Number(r.gross),
         commission: Number(r.commission || 0), transport: Number(r.transport || 0), net: net,
-        ptype: r.ptype, customer: r.customer || '', due: r.due || '',
-        lat: r.lat || '', lng: r.lng || '', device: r.device || '',
-        userId: u.id, userName: u.name, 'void': false, voidReason: '' });
-      log(u, 'sale', n + ' / ' + net);
+        ptype: r.ptype, customer: r.customer || &#x27;&#x27;, due: r.due || &#x27;&#x27;,
+        lat: r.lat || &#x27;&#x27;, lng: r.lng || &#x27;&#x27;, device: r.device || &#x27;&#x27;,
+        userId: u.id, userName: u.name, &#x27;void&#x27;: false, voidReason: &#x27;&#x27; });
+      log(u, &#x27;sale&#x27;, n + &#x27; / &#x27; + net);
       return { ok: 1, id: id, net: net };
     }
-    if (t === 'Expenses') {
-      if (!(Number(r.amount) &gt; 0)) return { error: 'BAD_AMOUNT' };
-      if (!b.img) return { error: 'NEED_PHOTO' };
-      append('Expenses', { id: id, opId: (r.opId || ''), date: now(), capturedAt: r.capturedAt || '', category: r.category,
-        amount: Number(r.amount), farm: r.farm, payer: r.payer, notes: r.notes || '',
-        photo: upload(b.img, id), lat: r.lat || '', lng: r.lng || '', device: r.device || '',
-        userId: u.id, userName: u.name, 'void': false, voidReason: '' });
-      log(u, 'expense', r.category + ' / ' + r.amount);
+    if (t === &#x27;Expenses&#x27;) {
+      if (!(Number(r.amount) &gt; 0)) return { error: &#x27;BAD_AMOUNT&#x27; };
+      if (!b.img) return { error: &#x27;NEED_PHOTO&#x27; };
+      append(&#x27;Expenses&#x27;, { id: id, opId: (r.opId || &#x27;&#x27;), date: now(), capturedAt: r.capturedAt || &#x27;&#x27;, category: r.category,
+        amount: Number(r.amount), farm: r.farm, payer: r.payer, notes: r.notes || &#x27;&#x27;,
+        photo: upload(b.img, id), lat: r.lat || &#x27;&#x27;, lng: r.lng || &#x27;&#x27;, device: r.device || &#x27;&#x27;,
+        userId: u.id, userName: u.name, &#x27;void&#x27;: false, voidReason: &#x27;&#x27; });
+      log(u, &#x27;expense&#x27;, r.category + &#x27; / &#x27; + r.amount);
       return { ok: 1, id: id };
     }
-    if (t === 'Payments') {
-      if (!(Number(r.amount) &gt; 0)) return { error: 'BAD_AMOUNT' };
-      append('Payments', { id: id, opId: (r.opId || ''), date: now(), saleId: r.saleId, amount: Number(r.amount),
-        method: r.method || 'cash', userId: u.id, userName: u.name, 'void': false, voidReason: '' });
-      log(u, 'payment', r.saleId + ' / ' + r.amount);
+    if (t === &#x27;Packing&#x27;) {
+      var fq = Number(r.fromQty), tq = Number(r.toQty);
+      var fu = String(r.fromUnit || &#x27;&#x27;).trim(), tu = String(r.toUnit || &#x27;&#x27;).trim();
+      var units = getUnits();
+      if (units.indexOf(fu) &lt; 0 || units.indexOf(tu) &lt; 0) return { error: &#x27;BAD_UNIT&#x27; };
+      if (fu === tu) return { error: &#x27;SAME_UNIT&#x27; };
+      if (!(fq &gt; 0) || !(tq &gt; 0)) return { error: &#x27;BAD_QTY&#x27; };
+      if (fq &gt; stock(r.farm, fu)) return { error: &#x27;NO_STOCK&#x27; };
+      append(&#x27;Packing&#x27;, { id: id, opId: (r.opId || &#x27;&#x27;), date: now(), farm: r.farm,
+        fromUnit: fu, fromQty: fq, toUnit: tu, toQty: tq, notes: r.notes || &#x27;&#x27;,
+        userId: u.id, userName: u.name, &#x27;void&#x27;: false, voidReason: &#x27;&#x27; });
+      log(u, &#x27;packing&#x27;, fq + &#x27; &#x27; + fu + &#x27; -&gt; &#x27; + tq + &#x27; &#x27; + tu);
       return { ok: 1, id: id };
     }
-    return { error: 'BAD_TABLE' };
+    if (t === &#x27;Payments&#x27;) {
+      if (!(Number(r.amount) &gt; 0)) return { error: &#x27;BAD_AMOUNT&#x27; };
+      append(&#x27;Payments&#x27;, { id: id, opId: (r.opId || &#x27;&#x27;), date: now(), saleId: r.saleId, amount: Number(r.amount),
+        method: r.method || &#x27;cash&#x27;, userId: u.id, userName: u.name, &#x27;void&#x27;: false, voidReason: &#x27;&#x27; });
+      log(u, &#x27;payment&#x27;, r.saleId + &#x27; / &#x27; + r.amount);
+      return { ok: 1, id: id };
+    }
+    return { error: &#x27;BAD_TABLE&#x27; };
   } finally { lock.releaseLock(); }
 }
 
 function voidRow(b, u) {
-  if (u.role !== 'admin') return { error: 'NOT_ADMIN' };
-  var t = b.t2, list = rows(t), s = sh(t), col = COLS[t].indexOf('void') + 1;
-  if (col === 0) return { error: 'BAD_TABLE' };
+  if (u.role !== &#x27;admin&#x27;) return { error: &#x27;NOT_ADMIN&#x27; };
+  var t = b.t2, list = rows(t), s = sh(t), col = COLS[t].indexOf(&#x27;void&#x27;) + 1;
+  if (col === 0) return { error: &#x27;BAD_TABLE&#x27; };
   for (var i = 0; i &lt; list.length; i++) {
     if (list[i].id === b.id) {
-      if (t === 'Harvests' &amp;&amp; stock(list[i].farm) - Number(list[i].baskets) &lt; 0) return { error: 'STOCK_LOCK' };
+      if (t === &#x27;Harvests&#x27; &amp;&amp; stock(list[i].farm, unitOf(list[i])) - Number(list[i].baskets) &lt; 0) return { error: &#x27;STOCK_LOCK&#x27; };
+      if (t === &#x27;Packing&#x27; &amp;&amp; stock(list[i].farm, String(list[i].toUnit)) - Number(list[i].toQty) &lt; 0) return { error: &#x27;STOCK_LOCK&#x27; };
       s.getRange(list[i]._row, col).setValue(true);
-      s.getRange(list[i]._row, col + 1).setValue(b.reason || '');
-      log(u, 'void', t + ' / ' + b.id + ' / ' + (b.reason || ''));
+      s.getRange(list[i]._row, col + 1).setValue(b.reason || &#x27;&#x27;);
+      dirty(t);
+      log(u, &#x27;void&#x27;, t + &#x27; / &#x27; + b.id + &#x27; / &#x27; + (b.reason || &#x27;&#x27;));
       return { ok: 1 };
     }
   }
-  return { error: 'NOT_FOUND' };
+  return { error: &#x27;NOT_FOUND&#x27; };
 }
 
 function addUser(b, u) {
-  if (u.role !== 'admin') return { error: 'NOT_ADMIN' };
-  if (!b.pass || b.pass.length &lt; 8) return { error: 'SHORT_PASS' };
+  if (u.role !== &#x27;admin&#x27;) return { error: &#x27;NOT_ADMIN&#x27; };
+  if (!b.pass || b.pass.length &lt; 8) return { error: &#x27;SHORT_PASS&#x27; };
   var em = canonEmail(b.email);
-  if (em &amp;&amp; !validEmail(em)) return { error: 'BAD_EMAIL' };
-  var us = rows('Users');
+  if (em &amp;&amp; !validEmail(em)) return { error: &#x27;BAD_EMAIL&#x27; };
+  var us = rows(&#x27;Users&#x27;);
   for (var i = 0; i &lt; us.length; i++) {
-    if (samePhone(us[i].phone, b.phone)) return { error: 'DUP_PHONE' };
-    if (em &amp;&amp; canonEmail(us[i].email) === em) return { error: 'DUP_EMAIL' };
+    if (samePhone(us[i].phone, b.phone)) return { error: &#x27;DUP_PHONE&#x27; };
+    if (em &amp;&amp; canonEmail(us[i].email) === em) return { error: &#x27;DUP_EMAIL&#x27; };
   }
   var salt = uid();
-  append('Users', { id: uid(), phone: local05(b.phone), name: b.name, role: b.role || 'operator',
-    hash: salt + '$' + hash(b.pass, salt), active: true, created: now(), email: em });
-  log(u, 'adduser', b.phone + ' / ' + b.role);
+  append(&#x27;Users&#x27;, { id: uid(), phone: local05(b.phone), name: b.name, role: b.role || &#x27;operator&#x27;,
+    hash: salt + &#x27;$&#x27; + hash(b.pass, salt), active: true, created: now(), email: em });
+  log(u, &#x27;adduser&#x27;, b.phone + &#x27; / &#x27; + b.role);
   return { ok: 1 };
 }
 
@@ -539,25 +576,55 @@ function addUser(b, u) {
    المفتاح يُحفظ في Project Settings &gt; Script Properties باسم GEMINI_KEY
    ولا يُكتب داخل الكود إطلاقًا. */
 
-function gKey() { return PropertiesService.getScriptProperties().getProperty('GEMINI_KEY'); }
+/* ═══════════ أنواع التعبئة ═══════════
+   قابلة للتعديل من لوحة الإدارة — لا تُثبَّت في الكود
+   حتى لا يحتاج تغييرها إعادة نشر. */
+var DEFAULT_UNITS = [&#x27;صندوق&#x27;, &#x27;بوكس&#x27;, &#x27;سلة&#x27;];
+
+function getUnits() {
+  var raw = PropertiesService.getScriptProperties().getProperty(&#x27;UNITS&#x27;);
+  if (raw) { try { var a = JSON.parse(raw); if (a &amp;&amp; a.length) return a; } catch (x) {} }
+  return DEFAULT_UNITS;
+}
+
+function setUnits(b, u) {
+  if (u.role !== &#x27;admin&#x27;) return { error: &#x27;NOT_ADMIN&#x27; };
+  var list = [];
+  for (var i = 0; i &lt; (b.units || []).length; i++) {
+    var v = String(b.units[i] || &#x27;&#x27;).trim();
+    if (v &amp;&amp; list.indexOf(v) &lt; 0) list.push(v);
+  }
+  if (!list.length) return { error: &#x27;NO_UNITS&#x27; };
+  PropertiesService.getScriptProperties().setProperty(&#x27;UNITS&#x27;, JSON.stringify(list));
+  log(u, &#x27;units&#x27;, list.join(&#x27; · &#x27;));
+  return { ok: 1, units: list };
+}
+
+/* الوحدة الافتراضية للسجلات القديمة التي سُجّلت قبل إضافة الأنواع */
+function unitOf(r) {
+  var v = String(r.unit === undefined || r.unit === null ? &#x27;&#x27; : r.unit).trim();
+  return v || &#x27;سلة&#x27;;
+}
+
+function gKey() { return PropertiesService.getScriptProperties().getProperty(&#x27;GEMINI_KEY&#x27;); }
 
 /* يبني قائمة نماذج مرشّحة من مفتاح المستخدم.
    الأفضلية لأسماء latest لأن النسخ المثبّتة (مثل ‎-001) بلا حصة مجانية. */
 function gModels(force) {
   var props = PropertiesService.getScriptProperties();
   if (!force) {
-    var saved = props.getProperty('GEMINI_MODELS');
+    var saved = props.getProperty(&#x27;GEMINI_MODELS&#x27;);
     if (saved) { try { return JSON.parse(saved); } catch (x) {} }
   }
-  var res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models',
-    { muteHttpExceptions: true, headers: { 'x-goog-api-key': gKey() } });
+  var res = UrlFetchApp.fetch(&#x27;https://generativelanguage.googleapis.com/v1beta/models&#x27;,
+    { muteHttpExceptions: true, headers: { &#x27;x-goog-api-key&#x27;: gKey() } });
   if (res.getResponseCode() !== 200) return [];
   var list = (JSON.parse(res.getContentText()).models) || [];
   var ok = [];
   for (var i = 0; i &lt; list.length; i++) {
     var m = list[i], meth = m.supportedGenerationMethods || m.supportedActions || [];
-    if (meth.indexOf('generateContent') &lt; 0) continue;
-    var n = String(m.name).replace('models/', '');
+    if (meth.indexOf(&#x27;generateContent&#x27;) &lt; 0) continue;
+    var n = String(m.name).replace(&#x27;models/&#x27;, &#x27;&#x27;);
     if (/embedding|imagen|tts|image|veo|learnlm|native-audio/i.test(n)) continue;
     ok.push(n);
   }
@@ -572,103 +639,103 @@ function gModels(force) {
   for (var k = 0; k &lt; order.length &amp;&amp; out.length &lt; 6; k++) {
     if (!seen[order[k]]) { seen[order[k]] = 1; out.push(order[k]); }
   }
-  props.setProperty('GEMINI_MODELS', JSON.stringify(out));
+  props.setProperty(&#x27;GEMINI_MODELS&#x27;, JSON.stringify(out));
   return out;
 }
 
 /* يجرّب المرشّحين بالترتيب: يتخطى المستنفد أو غير الموجود إلى التالي */
 function gJson(prompt, b64) {
   var key = gKey();
-  if (!key) return { error: 'NO_AI_KEY' };
+  if (!key) return { error: &#x27;NO_AI_KEY&#x27; };
   var models = gModels(false);
   if (!models.length) models = gModels(true);
-  if (!models.length) return { error: 'NO_AI_MODEL' };
+  if (!models.length) return { error: &#x27;NO_AI_MODEL&#x27; };
 
   var parts = [{ text: prompt }];
-  if (b64) parts.push({ inline_data: { mime_type: 'image/jpeg', data: b64 } });
+  if (b64) parts.push({ inline_data: { mime_type: &#x27;image/jpeg&#x27;, data: b64 } });
   var payload = JSON.stringify({
-    contents: [{ role: 'user', parts: parts }],
-    generationConfig: { temperature: 0.1, responseMimeType: 'application/json' }
+    contents: [{ role: &#x27;user&#x27;, parts: parts }],
+    generationConfig: { temperature: 0.1, responseMimeType: &#x27;application/json&#x27; }
   });
 
-  var lastCode = 0, lastBody = '';
+  var lastCode = 0, lastBody = &#x27;&#x27;;
   for (var i = 0; i &lt; models.length; i++) {
     var res = UrlFetchApp.fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/' + models[i] + ':generateContent',
-      { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-        headers: { 'x-goog-api-key': key }, payload: payload });
+      &#x27;https://generativelanguage.googleapis.com/v1beta/models/&#x27; + models[i] + &#x27;:generateContent&#x27;,
+      { method: &#x27;post&#x27;, contentType: &#x27;application/json&#x27;, muteHttpExceptions: true,
+        headers: { &#x27;x-goog-api-key&#x27;: key }, payload: payload });
     lastCode = res.getResponseCode();
     lastBody = res.getContentText();
     if (lastCode === 200) {
       try {
         var txt = JSON.parse(lastBody).candidates[0].content.parts[0].text;
         return { ok: 1, data: JSON.parse(txt), model: models[i] };
-      } catch (x) { return { error: 'AI_PARSE' }; }
+      } catch (x) { return { error: &#x27;AI_PARSE&#x27; }; }
     }
     /* 429 مستنفد · 404 غير موجود · 503 مشغول -&gt; جرّب التالي */
     if (lastCode !== 429 &amp;&amp; lastCode !== 404 &amp;&amp; lastCode !== 503) break;
-    PropertiesService.getScriptProperties().deleteProperty('GEMINI_MODELS');
+    PropertiesService.getScriptProperties().deleteProperty(&#x27;GEMINI_MODELS&#x27;);
   }
-  if (lastCode === 429) return { error: 'AI_QUOTA' };
-  return { error: 'AI_FAIL', detail: String(lastCode) + ' ' + lastBody.substring(0, 200) };
+  if (lastCode === 429) return { error: &#x27;AI_QUOTA&#x27; };
+  return { error: &#x27;AI_FAIL&#x27;, detail: String(lastCode) + &#x27; &#x27; + lastBody.substring(0, 200) };
 }
 
 var P_INVOICE =
-  'أنت محاسب. اقرأ صورة الفاتورة وأعد JSON فقط بهذه الحقول: ' +
-  '{"amount": المبلغ الإجمالي النهائي بالريال كرقم عشري بدون رمز عملة, ' +
-  '"supplier": اسم المورّد أو المتجر كنص, ' +
-  '"date": التاريخ بصيغة YYYY-MM-DD أو "" إن لم يظهر, ' +
-  '"category": واحدة فقط من [أسمدة ومغذيات, مياه وري, عمالة, نقل, صيانة, بذور وشتلات, مصروف آخر], ' +
-  '"confidence": ثقتك من 0 إلى 1}. ' +
-  'إن لم تجد المبلغ فاجعل amount = 0. لا تكتب أي شرح خارج JSON.';
+  &#x27;أنت محاسب. اقرأ صورة الفاتورة وأعد JSON فقط بهذه الحقول: &#x27; +
+  &#x27;{&quot;amount&quot;: المبلغ الإجمالي النهائي بالريال كرقم عشري بدون رمز عملة, &#x27; +
+  &#x27;&quot;supplier&quot;: اسم المورّد أو المتجر كنص, &#x27; +
+  &#x27;&quot;date&quot;: التاريخ بصيغة YYYY-MM-DD أو &quot;&quot; إن لم يظهر, &#x27; +
+  &#x27;&quot;category&quot;: واحدة فقط من [أسمدة ومغذيات, مياه وري, عمالة, نقل, صيانة, بذور وشتلات, مصروف آخر], &#x27; +
+  &#x27;&quot;confidence&quot;: ثقتك من 0 إلى 1}. &#x27; +
+  &#x27;إن لم تجد المبلغ فاجعل amount = 0. لا تكتب أي شرح خارج JSON.&#x27;;
 
 var P_HARVEST =
-  'أنت خبير جودة فراولة. حلّل صورة محصول الفراولة وأعد JSON فقط: ' +
-  '{"baskets": تقديرك لعدد السلال الظاهرة كرقم صحيح, ' +
-  '"quality": تقييم الجودة من 0 إلى 100 بناءً على اللون والنضج والتلف والحجم, ' +
-  '"notes": جملة عربية قصيرة جدًا (أقل من 12 كلمة) تصف الحالة, ' +
-  '"confidence": ثقتك في عدد السلال من 0 إلى 1}. ' +
-  'إن تعذر عدّ السلال فاجعل baskets = 0 و confidence = 0. لا تكتب أي شرح خارج JSON.';
+  &#x27;أنت خبير جودة فراولة. حلّل صورة محصول الفراولة وأعد JSON فقط: &#x27; +
+  &#x27;{&quot;baskets&quot;: تقديرك لعدد السلال الظاهرة كرقم صحيح, &#x27; +
+  &#x27;&quot;quality&quot;: تقييم الجودة من 0 إلى 100 بناءً على اللون والنضج والتلف والحجم, &#x27; +
+  &#x27;&quot;notes&quot;: جملة عربية قصيرة جدًا (أقل من 12 كلمة) تصف الحالة, &#x27; +
+  &#x27;&quot;confidence&quot;: ثقتك في عدد السلال من 0 إلى 1}. &#x27; +
+  &#x27;إن تعذر عدّ السلال فاجعل baskets = 0 و confidence = 0. لا تكتب أي شرح خارج JSON.&#x27;;
 
 function aiRun(b, u) {
-  if (b.mode === 'invoice') return gJson(P_INVOICE, b.img);
-  if (b.mode === 'harvest') return gJson(P_HARVEST, b.img);
-  if (b.mode === 'ping') {
-    if (!gKey()) return { error: 'NO_AI_KEY' };
+  if (b.mode === &#x27;invoice&#x27;) return gJson(P_INVOICE, b.img);
+  if (b.mode === &#x27;harvest&#x27;) return gJson(P_HARVEST, b.img);
+  if (b.mode === &#x27;ping&#x27;) {
+    if (!gKey()) return { error: &#x27;NO_AI_KEY&#x27; };
     /* اختبار حقيقي: يرسل طلبًا فعليًا ليتأكد من الحصة لا من وجود النموذج فقط */
-    var t = gJson('أعد JSON فقط: {"ok":1}', '');
+    var t = gJson(&#x27;أعد JSON فقط: {&quot;ok&quot;:1}&#x27;, &#x27;&#x27;);
     if (t.ok) return { ok: 1, model: t.model };
     return t;
   }
-  return { error: 'BAD_ACTION' };
+  return { error: &#x27;BAD_ACTION&#x27; };
 }
 
 function setUser(b, u) {
-  if (u.role !== 'admin') return { error: 'NOT_ADMIN' };
-  var us = rows('Users'), s = sh('Users');
+  if (u.role !== &#x27;admin&#x27;) return { error: &#x27;NOT_ADMIN&#x27; };
+  var us = rows(&#x27;Users&#x27;), s = sh(&#x27;Users&#x27;);
   for (var i = 0; i &lt; us.length; i++) {
     if (us[i].id === b.id) {
-      if (b.id === u.id &amp;&amp; b.active === false) return { error: 'SELF_LOCK' };
-      if (b.active !== undefined) s.getRange(us[i]._row, COLS.Users.indexOf('active') + 1).setValue(b.active);
+      if (b.id === u.id &amp;&amp; b.active === false) return { error: &#x27;SELF_LOCK&#x27; };
+      if (b.active !== undefined) s.getRange(us[i]._row, COLS.Users.indexOf(&#x27;active&#x27;) + 1).setValue(b.active);
       if (b.pass) {
-        if (b.pass.length &lt; 8) return { error: 'SHORT_PASS' };
+        if (b.pass.length &lt; 8) return { error: &#x27;SHORT_PASS&#x27; };
         var salt = uid();
-        s.getRange(us[i]._row, COLS.Users.indexOf('hash') + 1).setValue(salt + '$' + hash(b.pass, salt));
+        s.getRange(us[i]._row, COLS.Users.indexOf(&#x27;hash&#x27;) + 1).setValue(salt + &#x27;$&#x27; + hash(b.pass, salt));
       }
-      if (b.role) s.getRange(us[i]._row, COLS.Users.indexOf('role') + 1).setValue(b.role);
+      if (b.role) s.getRange(us[i]._row, COLS.Users.indexOf(&#x27;role&#x27;) + 1).setValue(b.role);
       if (b.email !== undefined) {
         var nem = canonEmail(b.email);
-        if (nem &amp;&amp; !validEmail(nem)) return { error: 'BAD_EMAIL' };
+        if (nem &amp;&amp; !validEmail(nem)) return { error: &#x27;BAD_EMAIL&#x27; };
         for (var k = 0; k &lt; us.length; k++) {
-          if (us[k].id !== b.id &amp;&amp; nem &amp;&amp; canonEmail(us[k].email) === nem) return { error: 'DUP_EMAIL' };
+          if (us[k].id !== b.id &amp;&amp; nem &amp;&amp; canonEmail(us[k].email) === nem) return { error: &#x27;DUP_EMAIL&#x27; };
         }
-        s.getRange(us[i]._row, COLS.Users.indexOf('email') + 1).setValue(nem);
+        s.getRange(us[i]._row, COLS.Users.indexOf(&#x27;email&#x27;) + 1).setValue(nem);
       }
-      log(u, 'setuser', b.id);
+      log(u, &#x27;setuser&#x27;, b.id);
       return { ok: 1 };
     }
   }
-  return { error: 'NOT_FOUND' };
+  return { error: &#x27;NOT_FOUND&#x27; };
 }
 
 
@@ -680,32 +747,32 @@ function setUser(b, u) {
    آمنة لأنها تتطلب الدخول لحسابك في Google — لا يمكن استدعاؤها من الويب.
    ═══════════════════════════════════════════════════════ */
 function resetAdminPassword() {
-  var us = rows('Users');
-  if (!us.length) { Logger.log('لا يوجد مستخدمون. افتح الموقع وأنشئ حساب المدير.'); return; }
-  var s = sh('Users');
+  var us = rows(&#x27;Users&#x27;);
+  if (!us.length) { Logger.log(&#x27;لا يوجد مستخدمون. افتح الموقع وأنشئ حساب المدير.&#x27;); return; }
+  var s = sh(&#x27;Users&#x27;);
   var target = us[0];
-  for (var i = 0; i &lt; us.length; i++) if (us[i].role === 'admin') { target = us[i]; break; }
+  for (var i = 0; i &lt; us.length; i++) if (us[i].role === &#x27;admin&#x27;) { target = us[i]; break; }
 
-  var pass = 'Mzr' + uid().substring(0, 9);
+  var pass = &#x27;Mzr&#x27; + uid().substring(0, 9);
   var salt = uid();
-  s.getRange(target._row, COLS.Users.indexOf('hash') + 1).setValue(salt + '$' + hash(pass, salt));
-  s.getRange(target._row, COLS.Users.indexOf('active') + 1).setValue(true);
+  s.getRange(target._row, COLS.Users.indexOf(&#x27;hash&#x27;) + 1).setValue(salt + &#x27;$&#x27; + hash(pass, salt));
+  s.getRange(target._row, COLS.Users.indexOf(&#x27;active&#x27;) + 1).setValue(true);
   bump(target.phone, true);
 
-  Logger.log('=======================================');
-  Logger.log('رقم الجوال المسجّل : ' + target.phone);
-  Logger.log('كلمة المرور الجديدة: ' + pass);
-  Logger.log('=======================================');
-  Logger.log('سجّل الدخول بهما ثم غيّر كلمة المرور من لوحة الإدارة.');
+  Logger.log(&#x27;=======================================&#x27;);
+  Logger.log(&#x27;رقم الجوال المسجّل : &#x27; + target.phone);
+  Logger.log(&#x27;كلمة المرور الجديدة: &#x27; + pass);
+  Logger.log(&#x27;=======================================&#x27;);
+  Logger.log(&#x27;سجّل الدخول بهما ثم غيّر كلمة المرور من لوحة الإدارة.&#x27;);
 }
 
 /* يعرض المستخدمين المسجّلين دون كلمات المرور — للتشخيص من المحرر */
 function listUsers() {
-  var us = rows('Users');
-  if (!us.length) { Logger.log('لا يوجد مستخدمون.'); return; }
+  var us = rows(&#x27;Users&#x27;);
+  if (!us.length) { Logger.log(&#x27;لا يوجد مستخدمون.&#x27;); return; }
   for (var i = 0; i &lt; us.length; i++) {
-    Logger.log((i + 1) + ') ' + us[i].name + ' | ' + us[i].phone +
-      ' | ' + us[i].role + ' | ' + (isTrue(us[i].active) ? 'نشط' : 'معطّل'));
+    Logger.log((i + 1) + &#x27;) &#x27; + us[i].name + &#x27; | &#x27; + us[i].phone +
+      &#x27; | &#x27; + us[i].role + &#x27; | &#x27; + (isTrue(us[i].active) ? &#x27;نشط&#x27; : &#x27;معطّل&#x27;));
   }
 }
 
@@ -715,16 +782,16 @@ var RESET_TTL_MIN = 15;      /* صلاحية الرمز */
 var RESET_MAX_TRIES = 5;     /* محاولات إدخال الرمز */
 var RESET_COOLDOWN_SEC = 60; /* بين طلبين لنفس البريد */
 
-function canonEmail(v) { return String(v === undefined || v === null ? '' : v).trim().toLowerCase(); }
+function canonEmail(v) { return String(v === undefined || v === null ? &#x27;&#x27; : v).trim().toLowerCase(); }
 function validEmail(v) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v); }
 function escHtml(v) {
-  return String(v === undefined || v === null ? '' : v)
-    .replace(/&amp;/g, '&amp;amp;').replace(/&lt;/g, '&amp;lt;').replace(/&gt;/g, '&amp;gt;');
+  return String(v === undefined || v === null ? &#x27;&#x27; : v)
+    .replace(/&amp;/g, &#x27;&amp;amp;&#x27;).replace(/&lt;/g, &#x27;&amp;lt;&#x27;).replace(/&gt;/g, &#x27;&amp;gt;&#x27;);
 }
-function resetKey(email) { return 'r_' + canonEmail(email); }
+function resetKey(email) { return &#x27;r_&#x27; + canonEmail(email); }
 
 function findByEmail(em) {
-  var us = rows('Users');
+  var us = rows(&#x27;Users&#x27;);
   for (var i = 0; i &lt; us.length; i++) {
     if (canonEmail(us[i].email) === em &amp;&amp; isTrue(us[i].active)) return us[i];
   }
@@ -734,7 +801,7 @@ function findByEmail(em) {
 /* يرد بنجاح دائمًا — حتى لا يكشف أي بريد مسجّل في النظام */
 function forgot(b) {
   var em = canonEmail(b.email);
-  if (!validEmail(em)) return { error: 'BAD_EMAIL' };
+  if (!validEmail(em)) return { error: &#x27;BAD_EMAIL&#x27; };
 
   var props = PropertiesService.getScriptProperties();
   var key = resetKey(em);
@@ -755,18 +822,18 @@ function forgot(b) {
 
   MailApp.sendEmail({
     to: em,
-    subject: 'رمز استعادة كلمة المرور — مزرعة قرضة ورظف',
+    subject: &#x27;رمز استعادة كلمة المرور — مزرعة قرضة ورظف&#x27;,
     htmlBody:
-      '&lt;div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;font-size:15px;color:#14211c"&gt;' +
-      '&lt;p&gt;مرحبًا ' + escHtml(target.name) + '،&lt;/p&gt;' +
-      '&lt;p&gt;رمز استعادة كلمة المرور الخاص بك:&lt;/p&gt;' +
-      '&lt;p style="font-size:32px;font-weight:bold;letter-spacing:8px;direction:ltr;' +
-      'background:#e9f4ef;color:#174c3b;padding:14px;border-radius:10px;text-align:center"&gt;' + code + '&lt;/p&gt;' +
-      '&lt;p&gt;الرمز صالح لمدة ' + RESET_TTL_MIN + ' دقيقة.&lt;/p&gt;' +
-      '&lt;p style="color:#6c7973"&gt;إن لم تطلب الاستعادة فتجاهل هذه الرسالة، ولم يتغيّر شيء في حسابك.&lt;/p&gt;' +
-      '&lt;/div&gt;'
+      &#x27;&lt;div dir=&quot;rtl&quot; style=&quot;font-family:Tahoma,Arial,sans-serif;font-size:15px;color:#14211c&quot;&gt;&#x27; +
+      &#x27;&lt;p&gt;مرحبًا &#x27; + escHtml(target.name) + &#x27;،&lt;/p&gt;&#x27; +
+      &#x27;&lt;p&gt;رمز استعادة كلمة المرور الخاص بك:&lt;/p&gt;&#x27; +
+      &#x27;&lt;p style=&quot;font-size:32px;font-weight:bold;letter-spacing:8px;direction:ltr;&#x27; +
+      &#x27;background:#e9f4ef;color:#174c3b;padding:14px;border-radius:10px;text-align:center&quot;&gt;&#x27; + code + &#x27;&lt;/p&gt;&#x27; +
+      &#x27;&lt;p&gt;الرمز صالح لمدة &#x27; + RESET_TTL_MIN + &#x27; دقيقة.&lt;/p&gt;&#x27; +
+      &#x27;&lt;p style=&quot;color:#6c7973&quot;&gt;إن لم تطلب الاستعادة فتجاهل هذه الرسالة، ولم يتغيّر شيء في حسابك.&lt;/p&gt;&#x27; +
+      &#x27;&lt;/div&gt;&#x27;
   });
-  log(null, 'forgot', em);
+  log(null, &#x27;forgot&#x27;, em);
   return { ok: 1 };
 }
 
@@ -775,43 +842,43 @@ function resetPass(b) {
   var props = PropertiesService.getScriptProperties();
   var key = resetKey(em);
   var raw = props.getProperty(key);
-  if (!raw) return { error: 'BAD_CODE' };
+  if (!raw) return { error: &#x27;BAD_CODE&#x27; };
 
   var rec;
-  try { rec = JSON.parse(raw); } catch (x) { props.deleteProperty(key); return { error: 'BAD_CODE' }; }
+  try { rec = JSON.parse(raw); } catch (x) { props.deleteProperty(key); return { error: &#x27;BAD_CODE&#x27; }; }
 
-  if (Date.now() - rec.at &gt; RESET_TTL_MIN * 60000) { props.deleteProperty(key); return { error: 'CODE_EXPIRED' }; }
-  if (rec.tries &gt;= RESET_MAX_TRIES) { props.deleteProperty(key); return { error: 'CODE_LOCKED' }; }
+  if (Date.now() - rec.at &gt; RESET_TTL_MIN * 60000) { props.deleteProperty(key); return { error: &#x27;CODE_EXPIRED&#x27; }; }
+  if (rec.tries &gt;= RESET_MAX_TRIES) { props.deleteProperty(key); return { error: &#x27;CODE_LOCKED&#x27; }; }
 
-  if (String(b.code === undefined || b.code === null ? '' : b.code).trim() !== rec.code) {
+  if (String(b.code === undefined || b.code === null ? &#x27;&#x27; : b.code).trim() !== rec.code) {
     rec.tries++;
     props.setProperty(key, JSON.stringify(rec));
-    return { error: 'BAD_CODE' };
+    return { error: &#x27;BAD_CODE&#x27; };
   }
-  if (!b.pass || b.pass.length &lt; 8) return { error: 'SHORT_PASS' };
+  if (!b.pass || b.pass.length &lt; 8) return { error: &#x27;SHORT_PASS&#x27; };
 
-  var us = rows('Users'), sheet = sh('Users'), col = COLS.Users.indexOf('hash') + 1;
+  var us = rows(&#x27;Users&#x27;), sheet = sh(&#x27;Users&#x27;), col = COLS.Users.indexOf(&#x27;hash&#x27;) + 1;
   for (var i = 0; i &lt; us.length; i++) {
     if (us[i].id === rec.id) {
       var salt = uid();
-      sheet.getRange(us[i]._row, col).setValue(salt + '$' + hash(b.pass, salt));
-      dirty('Users');
+      sheet.getRange(us[i]._row, col).setValue(salt + &#x27;$&#x27; + hash(b.pass, salt));
+      dirty(&#x27;Users&#x27;);
       props.deleteProperty(key);
       props.deleteProperty(lockKey(us[i].phone));  /* يفك أي قفل محاولات */
       killSessions(us[i].id);                      /* يبطل الجلسات القديمة */
-      log(null, 'reset', em);
+      log(null, &#x27;reset&#x27;, em);
       return { ok: 1 };
     }
   }
-  return { error: 'BAD_CODE' };
+  return { error: &#x27;BAD_CODE&#x27; };
 }
 
 function killSessions(userId) {
-  var sheet = sh('Sessions'), ss = readRows('Sessions'), n = 0;
+  var sheet = sh(&#x27;Sessions&#x27;), ss = readRows(&#x27;Sessions&#x27;), n = 0;
   for (var i = ss.length - 1; i &gt;= 0; i--) {
     if (ss[i].userId === userId) { sheet.deleteRow(ss[i]._row); n++; }
   }
-  if (n) dirty('Sessions');
+  if (n) dirty(&#x27;Sessions&#x27;);
 }
 </pre>
 </main>
